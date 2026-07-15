@@ -1,0 +1,32 @@
+{
+  "summary": "First-finish smoke test of SavyCampusDeals. Backend: 14/14 API checks pass (health, login admin, me, offers list+search+category, offer detail, claim as approved user, student-card, dashboard stats, forgot-password, signup, unverified 403 claim, verification auto-approve, save toggle, saved list, logout). Frontend: landing loads with hero CTA + nav-login, admin login redirects to /dashboard with dashboard-heading, /offers renders 12 cards, search 'Nike' filters to 1 card, /card shows student-card + QR. Console shows harmless 401 from /auth/me pre-login.",
+  "tested_scope": ["backend", "frontend", "auth", "integration"],
+  "passed": [
+    "GET /api/health 200",
+    "POST /api/auth/login (admin@savycampusdeals.in/Admin@123) 200 returns user+token",
+    "GET /api/auth/me with Bearer returns admin, verification_status=approved",
+    "GET /api/offers returns 12 seeded offers",
+    "GET /api/offers?q=Nike filters to 1 (Nike)",
+    "GET /api/offers?category=Fashion returns 3 (Nike, Zudio, Ray-Ban)",
+    "GET /api/offers/{id} 200",
+    "POST /api/offers/{id}/claim as approved user returns code SCD-XXXXXXXX + QR data URI",
+    "GET /api/student-card returns qr_data_uri + name",
+    "GET /api/dashboard/stats returns claimed/active/saved/reward_points",
+    "POST /api/auth/forgot-password returns {ok:true}",
+    "POST /api/auth/register creates student + returns token",
+    "POST /api/offers/{id}/claim as unverified user returns 403",
+    "POST /api/verification/submit auto-approves and issues SCD-2026-XXXXXX student_number",
+    "POST /api/offers/{id}/save toggles saved=true; GET /api/saved returns 1",
+    "POST /api/auth/logout 200",
+    "Frontend landing: hero-cta-primary + nav-login present",
+    "Frontend login flow: admin login redirects to /dashboard, dashboard-heading visible",
+    "Frontend /offers renders 12 offer cards; search 'Nike' filters to 1",
+    "Frontend /card renders student-card + student-card-qr with QR image"
+  ],
+  "failed": [],
+  "action_items": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "retest_needed": false,
+  "full_testing_deferred": true,
+  "notes": "Auto-approval verification works as designed for MVP. Bearer-token fallback + cookie both function. Minor: /auth/me returns 401 for anonymous visitors (expected) but shows as console error on landing — cosmetic only."
+}

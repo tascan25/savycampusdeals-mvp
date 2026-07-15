@@ -1,0 +1,62 @@
+import React, { useState } from "react";
+import { Link } from "react-router-dom";
+import { motion } from "framer-motion";
+import { Sparkles, Loader2 } from "lucide-react";
+import { toast } from "sonner";
+import api, { formatApiError } from "@/lib/api";
+
+export default function ForgotPassword() {
+  const [email, setEmail] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [err, setErr] = useState("");
+
+  const onSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setErr("");
+    try {
+      await api.post("/auth/forgot-password", { email });
+      setSent(true);
+      toast.success("If that account exists, we sent a reset link.");
+    } catch (e) {
+      setErr(formatApiError(e.response?.data?.detail));
+    } finally { setLoading(false); }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#050505] grain flex items-center justify-center px-6">
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+        className="glass-heavy rounded-3xl p-8 md:p-10 w-full max-w-md">
+        <Link to="/" className="inline-flex items-center gap-2 mb-6">
+          <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 grid place-items-center"><Sparkles size={16}/></div>
+          <span className="font-display font-bold text-lg">Savy<span className="text-indigo-400">.</span></span>
+        </Link>
+        <h1 className="font-display text-3xl font-extrabold">Reset password</h1>
+        <p className="text-zinc-400 text-sm mt-2">Enter your email — we'll send a reset link.</p>
+        {sent ? (
+          <div className="mt-8 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 p-4 text-sm">
+            Check your inbox for the reset link.
+          </div>
+        ) : (
+          <form onSubmit={onSubmit} className="mt-8 space-y-4">
+            <input
+              data-testid="forgot-email-input"
+              type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
+              className="w-full rounded-xl bg-white/5 border border-white/10 px-4 py-3 text-white focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/40 focus:outline-none"
+              placeholder="you@college.edu"
+            />
+            {err && <div className="text-sm text-red-400">{err}</div>}
+            <button data-testid="forgot-submit-btn" disabled={loading}
+              className="w-full rounded-full bg-white text-black font-semibold py-3 disabled:opacity-60">
+              {loading ? <Loader2 size={16} className="animate-spin inline"/> : "Send reset link"}
+            </button>
+          </form>
+        )}
+        <div className="mt-6 text-sm text-zinc-400 text-center">
+          <Link to="/login" className="text-white hover:text-indigo-300">← Back to login</Link>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
