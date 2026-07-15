@@ -126,6 +126,15 @@ def set_auth_cookie(response: Response, token: str):
     )
 
 
+def _aware(dt):
+    """Ensure datetime is tz-aware UTC (MongoDB returns naive BSON datetimes)."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 def send_email(to: str, subject: str, html: str) -> bool:
     if not RESEND_API_KEY:
         logger.warning(f"[Email skipped: no key] To={to} Subject={subject}")
@@ -429,6 +438,7 @@ async def student_card(user=Depends(get_current_user)):
 # -----------------------------
 def serialize_offer(o: dict, saved_ids: set = None) -> dict:
     saved_ids = saved_ids or set()
+    outlet_id = o.get("outlet_id")
     return {
         "id": str(o["_id"]),
         "title": o["title"],
@@ -445,6 +455,28 @@ def serialize_offer(o: dict, saved_ids: set = None) -> dict:
         "location": o.get("location", "Pan India"),
         "claims_count": o.get("claims_count", 0),
         "saved": str(o["_id"]) in saved_ids,
+        "outlet_id": str(outlet_id) if outlet_id else None,
+        "created_at": o.get("created_at").isoformat() if o.get("created_at") else None,
+    }
+
+
+def serialize_outlet(o: dict, offer_count: int = 0) -> dict:
+    return {
+        "id": str(o["_id"]),
+        "name": o["name"],
+        "tagline": o.get("tagline", ""),
+        "cuisine": o.get("cuisine", ""),
+        "city": o.get("city", ""),
+        "address": o.get("address", ""),
+        "lat": o.get("lat"),
+        "lng": o.get("lng"),
+        "image_url": o.get("image_url", ""),
+        "logo_url": o.get("logo_url", ""),
+        "cover_url": o.get("cover_url", ""),
+        "phone": o.get("phone", ""),
+        "hours": o.get("hours", ""),
+        "rating": o.get("rating", 4.5),
+        "offer_count": offer_count,
     }
 
 
@@ -574,10 +606,28 @@ async def claim_offer(offer_id: str, user=Depends(get_current_user)):
     if not offer:
         raise HTTPException(404, "Offer not found")
 
-    # prevent duplicate active coupon
+    # prevent duplicate active coupon for same offer
     existing = await db.coupons.find_one({"user_id": user["_id"], "offer_id": oid, "status": "active"})
     if existing:
         return serialize_coupon(existing, offer)
+
+    # OUTLET GATE: if offer belongs to an outlet, ensure user has NOT already redeemed
+    # a newer-or-same-vintage deal at this outlet.
+    outlet_oid = offer.get("outlet_id")
+    if outlet_oid:
+        last_redeemed = await db.coupons.find_one(
+            {"user_id": user["_id"], "outlet_id": outlet_oid, "status": "redeemed"},
+            sort=[("redeemed_at", -1)],
+        )
+        if last_redeemed:
+            last_offer = await db.offers.find_one({"_id": last_redeemed["offer_id"]})
+            last_created = last_offer.get("created_at") if last_offer else None
+            this_created = offer.get("created_at")
+            if last_created and this_created and this_created <= last_created:
+                raise HTTPException(
+                    409,
+                    "You've already redeemed a deal at this outlet. Wait for a new deal to be posted here.",
+                )
 
     code = f"SCD-{secrets.token_hex(4).upper()}"
     now = datetime.now(timezone.utc)
@@ -587,6 +637,7 @@ async def claim_offer(offer_id: str, user=Depends(get_current_user)):
     doc = {
         "user_id": user["_id"],
         "offer_id": oid,
+        "outlet_id": outlet_oid,
         "code": code,
         "qr_data_uri": qr,
         "status": "active",  # active | redeemed | expired
@@ -643,6 +694,194 @@ async def dashboard_stats(user=Depends(get_current_user)):
         "referral_code": user.get("referral_code", ""),
         "verification_status": user.get("verification_status", "unverified"),
         "total_offers": total_offers,
+    }
+
+
+# -----------------------------
+# Outlets (local restaurants/cafes)
+# -----------------------------
+@api.get("/outlets")
+async def list_outlets(city: Optional[str] = None, q: Optional[str] = None):
+    query: dict = {}
+    if city and city != "all":
+        query["city"] = city
+    if q:
+        query["$or"] = [
+            {"name": {"$regex": q, "$options": "i"}},
+            {"cuisine": {"$regex": q, "$options": "i"}},
+            {"address": {"$regex": q, "$options": "i"}},
+        ]
+    outlets = await db.outlets.find(query).to_list(200)
+    result = []
+    for o in outlets:
+        count = await db.offers.count_documents({"outlet_id": o["_id"]})
+        result.append(serialize_outlet(o, count))
+    return result
+
+
+@api.get("/outlets/cities")
+async def list_outlet_cities():
+    return sorted(await db.outlets.distinct("city"))
+
+
+@api.get("/outlets/{outlet_id}")
+async def get_outlet(outlet_id: str, request: Request):
+    try:
+        oid = ObjectId(outlet_id)
+    except Exception:
+        raise HTTPException(404, "Outlet not found")
+    outlet = await db.outlets.find_one({"_id": oid})
+    if not outlet:
+        raise HTTPException(404, "Outlet not found")
+
+    offers = await db.offers.find({"outlet_id": oid}).sort("created_at", -1).to_list(50)
+
+    saved_ids: set = set()
+    already_redeemed_outlet = False
+    try:
+        user = await get_current_user(request)
+        saved = await db.saved_offers.find({"user_id": user["_id"]}).to_list(500)
+        saved_ids = {str(s["offer_id"]) for s in saved}
+        # gate info
+        already_redeemed_outlet = bool(
+            await db.coupons.find_one(
+                {"user_id": user["_id"], "outlet_id": oid, "status": "redeemed"}
+            )
+        )
+    except Exception:
+        pass
+
+    return {
+        **serialize_outlet(outlet, len(offers)),
+        "offers": [serialize_offer(o, saved_ids) for o in offers],
+        "already_redeemed_here": already_redeemed_outlet,
+    }
+
+
+# -----------------------------
+# Restaurant Scanner APIs
+# -----------------------------
+class ScanIn(BaseModel):
+    payload: str
+
+
+def _parse_qr_payload(raw: str) -> dict:
+    """Parse QR string. Supports:
+       SCD|student_number|user_id|email  (student card)
+       COUPON|code|user_id|offer_id      (coupon)
+       raw coupon code like SCD-XXXXXXXX
+       raw student number like SCD-2026-XXXXXX
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return {"kind": "unknown"}
+    parts = raw.split("|")
+    if len(parts) >= 4 and parts[0] == "SCD":
+        return {"kind": "student", "student_number": parts[1], "user_id": parts[2], "email": parts[3]}
+    if len(parts) >= 4 and parts[0] == "COUPON":
+        return {"kind": "coupon", "code": parts[1], "user_id": parts[2], "offer_id": parts[3]}
+    if raw.upper().startswith("SCD-") and len(raw) >= 8:
+        # Student numbers look like SCD-2026-XXXXXX ; coupon codes like SCD-XXXXXXXX
+        segs = raw.split("-")
+        if len(segs) == 3:
+            return {"kind": "student", "student_number": raw}
+        return {"kind": "coupon", "code": raw}
+    return {"kind": "unknown"}
+
+
+@api.post("/scan/lookup")
+async def scan_lookup(body: ScanIn):
+    """Public endpoint used by restaurant staff. Parses QR + returns student/coupon info."""
+    parsed = _parse_qr_payload(body.payload)
+
+    if parsed["kind"] == "student":
+        user = None
+        if parsed.get("user_id"):
+            try:
+                user = await db.users.find_one({"_id": ObjectId(parsed["user_id"])})
+            except Exception:
+                user = None
+        if not user and parsed.get("student_number"):
+            user = await db.users.find_one({"student_number": parsed["student_number"]})
+        if not user:
+            raise HTTPException(404, "Student not found")
+        approved = user.get("verification_status") == "approved"
+        expiry = user.get("verification_expiry")
+        return {
+            "kind": "student",
+            "verified": approved,
+            "name": user.get("name", ""),
+            "college": user.get("college", ""),
+            "course": user.get("course", ""),
+            "year": user.get("year", ""),
+            "student_number": user.get("student_number", ""),
+            "email": user.get("email", ""),
+            "expiry": expiry.isoformat() if expiry else None,
+            "expired": bool(expiry and _aware(expiry) < datetime.now(timezone.utc)),
+        }
+
+    if parsed["kind"] == "coupon":
+        c = None
+        if parsed.get("code"):
+            c = await db.coupons.find_one({"code": parsed["code"]})
+        if not c:
+            raise HTTPException(404, "Coupon not found")
+        offer = await db.offers.find_one({"_id": c["offer_id"]})
+        user = await db.users.find_one({"_id": c["user_id"]})
+        return {
+            "kind": "coupon",
+            "code": c["code"],
+            "status": c["status"],
+            "expired": bool(c.get("expires_at") and _aware(c["expires_at"]) < datetime.now(timezone.utc)),
+            "offer_title": (offer or {}).get("title", ""),
+            "brand": (offer or {}).get("brand", ""),
+            "discount": (offer or {}).get("discount", ""),
+            "outlet_id": str(offer.get("outlet_id")) if offer and offer.get("outlet_id") else None,
+            "student_name": (user or {}).get("name", ""),
+            "student_number": (user or {}).get("student_number", ""),
+            "student_verified": (user or {}).get("verification_status") == "approved",
+            "redeemed_at": c["redeemed_at"].isoformat() if c.get("redeemed_at") else None,
+        }
+
+    raise HTTPException(400, "Unrecognised QR code")
+
+
+@api.post("/scan/redeem")
+async def scan_redeem(body: ScanIn):
+    """Restaurant marks a coupon as redeemed."""
+    parsed = _parse_qr_payload(body.payload)
+    if parsed["kind"] != "coupon":
+        raise HTTPException(400, "Not a coupon QR")
+    code = parsed.get("code")
+    if not code:
+        raise HTTPException(400, "Invalid coupon")
+    c = await db.coupons.find_one({"code": code})
+    if not c:
+        raise HTTPException(404, "Coupon not found")
+    if c["status"] == "redeemed":
+        raise HTTPException(409, "Coupon already redeemed")
+    if c.get("expires_at") and _aware(c["expires_at"]) < datetime.now(timezone.utc):
+        await db.coupons.update_one({"_id": c["_id"]}, {"$set": {"status": "expired"}})
+        raise HTTPException(410, "Coupon has expired")
+
+    user = await db.users.find_one({"_id": c["user_id"]})
+    if not user or user.get("verification_status") != "approved":
+        raise HTTPException(403, "Student not verified")
+
+    now = datetime.now(timezone.utc)
+    await db.coupons.update_one(
+        {"_id": c["_id"]}, {"$set": {"status": "redeemed", "redeemed_at": now}}
+    )
+    offer = await db.offers.find_one({"_id": c["offer_id"]})
+    return {
+        "ok": True,
+        "code": c["code"],
+        "redeemed_at": now.isoformat(),
+        "offer_title": (offer or {}).get("title", ""),
+        "discount": (offer or {}).get("discount", ""),
+        "brand": (offer or {}).get("brand", ""),
+        "student_name": user.get("name", ""),
+        "student_number": user.get("student_number", ""),
     }
 
 
@@ -837,9 +1076,150 @@ async def seed_offers():
     if await db.offers.count_documents({}) > 0:
         return
     now = datetime.now(timezone.utc)
-    docs = [{**o, "created_at": now} for o in SEED_OFFERS]
+    docs = [{**o, "created_at": now, "outlet_id": None} for o in SEED_OFFERS]
     await db.offers.insert_many(docs)
     logger.info(f"Seeded {len(docs)} offers")
+
+
+SEED_OUTLETS = [
+    {
+        "name": "Roastery & Co.",
+        "tagline": "Third-wave coffee + fresh bakes",
+        "cuisine": "Cafe • Bakery",
+        "city": "Mumbai",
+        "address": "Bandra Linking Road, Mumbai 400050",
+        "lat": 19.0680, "lng": 72.8365,
+        "image_url": "https://images.pexels.com/photos/34482998/pexels-photo-34482998.jpeg",
+        "cover_url": "https://images.pexels.com/photos/34482998/pexels-photo-34482998.jpeg",
+        "logo_url": "https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=200",
+        "phone": "+91 98200 12345",
+        "hours": "8am – 11pm",
+        "rating": 4.7,
+        "offers": [
+            {"title": "Buy 1 Get 1 on Cold Brews", "discount": "BOGO", "description": "Every cold brew comes with a friend, on us. Verified students only.", "terms": "In-store only. Cannot combine with other offers.", "validity": "Till 31 Dec", "featured": True, "trending": True},
+            {"title": "30% OFF Weekend Brunch", "discount": "30% OFF", "description": "Sat & Sun mornings, hit our brunch spread for 30% less.", "terms": "Valid Sat/Sun 9-1pm only.", "validity": "Weekends"},
+        ],
+    },
+    {
+        "name": "Momo Mafia",
+        "tagline": "Steamed. Fried. Iconic.",
+        "cuisine": "Asian • Momos",
+        "city": "Delhi",
+        "address": "Hudson Lane, GTB Nagar, Delhi 110009",
+        "lat": 28.7047, "lng": 77.2109,
+        "image_url": "https://images.unsplash.com/photo-1626804475297-41608ea09aeb?w=1200",
+        "cover_url": "https://images.unsplash.com/photo-1626804475297-41608ea09aeb?w=1600",
+        "logo_url": "https://images.unsplash.com/photo-1626804475297-41608ea09aeb?w=200",
+        "phone": "+91 98111 78901",
+        "hours": "11am – 12am",
+        "rating": 4.5,
+        "offers": [
+            {"title": "Flat ₹100 OFF on Orders ₹299+", "discount": "₹100 OFF", "description": "Because 10 momos > 8.", "terms": "Min order ₹299. Dine-in only.", "validity": "Till 15 Jan", "trending": True},
+        ],
+    },
+    {
+        "name": "The Book Barn",
+        "tagline": "Boba tea + study cocoons",
+        "cuisine": "Cafe • Boba",
+        "city": "Bangalore",
+        "address": "Church Street, Bangalore 560001",
+        "lat": 12.9754, "lng": 77.6084,
+        "image_url": "https://images.unsplash.com/photo-1445116572660-236099ec97a0?w=1200",
+        "cover_url": "https://images.unsplash.com/photo-1445116572660-236099ec97a0?w=1600",
+        "logo_url": "https://images.unsplash.com/photo-1445116572660-236099ec97a0?w=200",
+        "phone": "+91 80482 76543",
+        "hours": "9am – 11pm",
+        "rating": 4.8,
+        "offers": [
+            {"title": "Free Boba Upgrade + 20% OFF", "discount": "20% OFF", "description": "Level up any drink to boba, free. Plus 20% off the bill.", "terms": "In-store only.", "validity": "Ongoing", "featured": True},
+        ],
+    },
+    {
+        "name": "Burger Republic",
+        "tagline": "Smash burgers, done right",
+        "cuisine": "American • Burgers",
+        "city": "Mumbai",
+        "address": "Powai Central, Mumbai 400076",
+        "lat": 19.1176, "lng": 72.9060,
+        "image_url": "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=1200",
+        "cover_url": "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=1600",
+        "logo_url": "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=200",
+        "phone": "+91 96000 44444",
+        "hours": "12pm – 1am",
+        "rating": 4.6,
+        "offers": [
+            {"title": "Free Fries + Coke on Any Burger", "discount": "FREE COMBO", "description": "Any burger, we throw in fries + a drink. On the house.", "terms": "One combo per student per visit.", "validity": "Weekdays only", "trending": True},
+        ],
+    },
+    {
+        "name": "South Side Idli",
+        "tagline": "Filter coffee & fluffy idlis",
+        "cuisine": "South Indian",
+        "city": "Bangalore",
+        "address": "Jayanagar 4th Block, Bangalore 560011",
+        "lat": 12.9299, "lng": 77.5834,
+        "image_url": "https://images.unsplash.com/photo-1567337710282-00832b415979?w=1200",
+        "cover_url": "https://images.unsplash.com/photo-1567337710282-00832b415979?w=1600",
+        "logo_url": "https://images.unsplash.com/photo-1567337710282-00832b415979?w=200",
+        "phone": "+91 80999 22221",
+        "hours": "6am – 10pm",
+        "rating": 4.9,
+        "offers": [
+            {"title": "Unlimited Thali at ₹149", "discount": "₹149 THALI", "description": "Unlimited South Indian thali for verified students.", "terms": "Dine-in only. Lunch (12-3pm).", "validity": "Till 28 Feb", "featured": True},
+        ],
+    },
+    {
+        "name": "Chai Point Studio",
+        "tagline": "Cutting chai + maggi combos",
+        "cuisine": "Cafe • Snacks",
+        "city": "Delhi",
+        "address": "Kamla Nagar, Delhi 110007",
+        "lat": 28.6864, "lng": 77.2072,
+        "image_url": "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=1200",
+        "cover_url": "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=1600",
+        "logo_url": "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=200",
+        "phone": "+91 97733 55511",
+        "hours": "7am – 11pm",
+        "rating": 4.4,
+        "offers": [
+            {"title": "₹99 Maggi + Chai Combo", "discount": "₹99 COMBO", "description": "The DU tradition: maggi + chai for ninety-nine.", "terms": "Dine-in only.", "validity": "Ongoing"},
+        ],
+    },
+]
+
+
+async def seed_outlets():
+    if await db.outlets.count_documents({}) > 0:
+        return
+    now = datetime.now(timezone.utc)
+    for od in SEED_OUTLETS:
+        offers = od.pop("offers", [])
+        outlet_doc = {**od, "created_at": now}
+        res = await db.outlets.insert_one(outlet_doc)
+        outlet_id = res.inserted_id
+        # attach offers to outlet
+        offer_docs = []
+        for o in offers:
+            offer_docs.append({
+                "title": o["title"],
+                "brand": od["name"],
+                "brand_logo": od.get("logo_url", ""),
+                "category": "Food & Drink",
+                "description": o["description"],
+                "discount": o["discount"],
+                "image_url": od.get("cover_url", od.get("image_url", "")),
+                "terms": o.get("terms", ""),
+                "validity": o.get("validity", "Ongoing"),
+                "featured": o.get("featured", False),
+                "trending": o.get("trending", False),
+                "location": f"{od['name']} • {od['city']}",
+                "claims_count": 0,
+                "outlet_id": outlet_id,
+                "created_at": now,
+            })
+        if offer_docs:
+            await db.offers.insert_many(offer_docs)
+    logger.info(f"Seeded {len(SEED_OUTLETS)} outlets with their offers")
 
 
 async def seed_admin():
@@ -875,6 +1255,7 @@ async def on_startup():
         logger.warning(f"Index warn: {e}")
     await seed_admin()
     await seed_offers()
+    await seed_outlets()
 
 
 @api.get("/health")

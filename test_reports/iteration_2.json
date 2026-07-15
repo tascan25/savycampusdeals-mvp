@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 2 (Outlets + Restaurant Scanner + Outlet Gate) tested end-to-end. Backend: 10/10 pytest tests pass after fixing a critical tz-comparison bug in /api/scan/lookup and /api/scan/redeem. Frontend: /outlets (6 cards, city select, search), /outlets/:id (hero, deals list, address, map iframe, directions link, back button), /scan (mode toggle, manual student lookup with Verified badge, manual coupon lookup with Redeem button), Navbar shows Offers/Outlets/Scan for anonymous users, Landing shows 6 outlet cards + view-all link. Outlet gate verified: same-outlet second claim after redeem returns 409; unrelated outlet + non-outlet offers still claimable.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/auth/register + /api/verification/submit + /api/offers/{id}/claim", "issue": "send_email() throws Resend errors ('You can only send testing emails to your own email address') in logs but is caught and returns False — non-blocking, just log noise."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "OutletDetail hero", "issues": ["Hero image is cropped tightly on some outlets (e.g., Roastery & Co. shows only table-leg region because aspect-[16/7] + object-cover on a portrait-oriented photo). Consider object-position or curated landscape covers."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_outlets_scan.py", "/app/test_reports/pytest/iteration_2.xml"],
+  "action_items": [
+    "Review the tz-aware fix I applied in /app/backend/server.py (added _aware() helper; wrapped 3 comparisons in scan_lookup/scan_redeem). Consider applying the same helper everywhere MongoDB datetimes are compared to datetime.now(timezone.utc) to prevent future regressions (e.g., password_resets expiry check on line 323 also compares naive DB dt to aware — currently passes because pymongo returns naive but should be normalised for safety).",
+    "Optional: fix Resend FROM domain or gate send_email() by env to reduce log noise in dev."
+  ],
+  "critical_code_review_comments": [
+    "BUG FIXED by tester: scan_lookup + scan_redeem crashed with TypeError('can't compare offset-naive and offset-aware datetimes') on every coupon/student lookup because MongoDB returns naive UTC datetimes but code compared them with datetime.now(timezone.utc). Introduced _aware(dt) helper and wrapped 3 comparisons.",
+    "Same pattern latent risk at server.py line 323 (password_resets expiry) — comparing doc['expires_at'] (naive from DB) with datetime.now(timezone.utc). Works currently by luck of comparison semantics on some Python versions? Actually it will raise TypeError if a reset is ever attempted. Recommend normalising with _aware() there too.",
+    "Outlet gate logic (server.py 605-621) uses this_created <= last_created — both naive from DB, so safe. Good.",
+    "seed_offers count check runs before seed_outlets, so outlet offers won't block generic seed. Ordering is correct.",
+    "server.py is 1281 lines — approaching the 700-line split threshold. Consider splitting into routers (auth, offers, outlets, scan, verification).",
+    "@app.on_event('startup') is deprecated in FastAPI — migrate to lifespan handlers."
+  ],
+  "updated_files": ["/app/backend/server.py (added _aware() helper + 3 fixes)", "/app/backend/tests/test_outlets_scan.py (new)"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "Admin: admin@savycampusdeals.in / Admin@123. Fresh students created via /api/auth/register using @example.com emails (email-validator rejects .test TLD).",
+  "seed_data_creation": "6 outlets + 8 outlet-linked offers + 13 non-outlet SEED_OFFERS auto-seeded on backend startup. Multiple test students created during pytest run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Bug fixed: naive-vs-aware datetime comparison in scan endpoints. If further scan/coupon-expiry regressions appear, check the _aware() wrapper is still applied. Test users created with @example.com only (.test TLD is blocked by email-validator).",
+  "rca_of_the_issue": "RCA: MongoDB (BSON) stores datetimes as naive UTC. When Python code does `db_dt < datetime.now(timezone.utc)` a TypeError is raised because one side is naive and the other is tz-aware. Repro: POST /api/scan/lookup with any coupon code → 500. Mitigation: introduced _aware(dt) helper which promotes naive dt to UTC-aware, then applied to expires_at/verification_expiry comparisons in scan_lookup and scan_redeem. Verified via pytest (10/10) and UI (Scan → manual coupon lookup → Redeem visible)."
+}

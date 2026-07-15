@@ -1,7 +1,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowRight, BadgeCheck, Sparkles, ShieldCheck, Zap, Users, Star, ChevronDown } from "lucide-react";
+import { ArrowRight, BadgeCheck, Sparkles, ShieldCheck, Zap, Users, Star, ChevronDown, MapPin, Utensils } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import api from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
@@ -32,6 +32,10 @@ export default function Landing() {
   const { data: offers = [] } = useQuery({
     queryKey: ["landing-offers"],
     queryFn: async () => (await api.get("/offers", { params: { sort: "featured" } })).data,
+  });
+  const { data: outlets = [] } = useQuery({
+    queryKey: ["landing-outlets"],
+    queryFn: async () => (await api.get("/outlets")).data,
   });
 
   return (
@@ -152,6 +156,47 @@ export default function Landing() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {offers.slice(0, 6).map((o, i) => (
               <OfferCard key={o.id} offer={o} index={i} />
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* LOCAL OUTLETS */}
+      <section className="relative py-24">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="flex items-end justify-between mb-8">
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.3em] text-emerald-400 flex items-center gap-2"><Utensils size={12}/> Around you</div>
+              <h2 className="font-display text-4xl md:text-5xl font-extrabold tracking-tight mt-3">Local outlets, real perks.</h2>
+              <p className="text-zinc-400 mt-3 max-w-xl">Walk in with your Savy pass. Walk out with the discount. Deals at your favourite neighbourhood spots.</p>
+            </div>
+            <Link to="/outlets" data-testid="landing-view-all-outlets" className="hidden md:inline-flex items-center gap-1 text-sm text-zinc-300 hover:text-white">All outlets <ArrowRight size={14}/></Link>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {outlets.slice(0, 6).map((o, i) => (
+              <motion.div
+                key={o.id}
+                initial={{ y: 24, opacity: 0 }} whileInView={{ y: 0, opacity: 1 }} viewport={{ once: true, margin: "-30px" }}
+                transition={{ duration: 0.5, delay: (i % 6) * 0.06 }}
+                data-testid={`landing-outlet-${o.id}`}
+              >
+                <Link to={`/outlets/${o.id}`} className="group block rounded-2xl bg-[#0A0A0C] border border-white/5 hover:border-white/20 overflow-hidden">
+                  <div className="relative aspect-[16/10] overflow-hidden">
+                    <img src={o.image_url} alt={o.name} className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-110"/>
+                    <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent"/>
+                    <div className="absolute top-3 left-3 flex items-center gap-1.5 glass-heavy rounded-full px-2.5 py-1 text-[10px] uppercase tracking-widest text-white"><MapPin size={10}/> {o.city}</div>
+                    <div className="absolute top-3 right-3 flex items-center gap-1 glass-heavy rounded-full px-2.5 py-1 text-[11px] text-amber-300"><Star size={11} fill="currentColor"/> {o.rating.toFixed(1)}</div>
+                    <div className="absolute bottom-3 left-3">
+                      <div className="text-[10px] uppercase tracking-widest text-white/70">{o.cuisine}</div>
+                      <div className="font-display text-xl font-extrabold">{o.name}</div>
+                    </div>
+                  </div>
+                  <div className="p-4 flex items-center justify-between">
+                    <div className="text-sm text-zinc-400 line-clamp-1">{o.tagline}</div>
+                    <div className="inline-flex items-center gap-1 text-xs rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-400/30 px-2.5 py-1">{o.offer_count} deals</div>
+                  </div>
+                </Link>
+              </motion.div>
             ))}
           </div>
         </div>

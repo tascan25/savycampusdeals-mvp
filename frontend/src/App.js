@@ -17,6 +17,9 @@ import OfferDetail from "@/pages/OfferDetail";
 import StudentCard from "@/pages/StudentCard";
 import SavedOffers from "@/pages/SavedOffers";
 import MyCoupons from "@/pages/MyCoupons";
+import Outlets from "@/pages/Outlets";
+import OutletDetail from "@/pages/OutletDetail";
+import Scan from "@/pages/Scan";
 
 export default function App() {
   return (
@@ -32,6 +35,9 @@ export default function App() {
           <Route path="/verify-email/:token" element={<VerifyEmail />} />
           <Route path="/offers" element={<Offers />} />
           <Route path="/offers/:id" element={<OfferDetail />} />
+          <Route path="/outlets" element={<Outlets />} />
+          <Route path="/outlets/:id" element={<OutletDetail />} />
+          <Route path="/scan" element={<Scan />} />
           <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/verify" element={<ProtectedRoute><Verify /></ProtectedRoute>} />
           <Route path="/card" element={<ProtectedRoute><StudentCard /></ProtectedRoute>} />
