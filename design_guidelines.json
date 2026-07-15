@@ -1,0 +1,134 @@
+{
+  "project_name": "SavyCampusDeals",
+  "theme": "dark",
+  "target_audience": "Indian Gen-Z College Students",
+  "design_vibe": "Luxurious, Exclusive, Gen-Z, Premium Club, High-Energy",
+  "typography": {
+    "headings": {
+      "font_family": "Outfit, sans-serif",
+      "weight": "700, 800",
+      "letter_spacing": "tracking-tight",
+      "usage": "Use for all H1-H4. Never use Inter for headings."
+    },
+    "body": {
+      "font_family": "Manrope, sans-serif",
+      "weight": "400, 500",
+      "letter_spacing": "tracking-normal",
+      "usage": "Use for body text, descriptions, small labels."
+    },
+    "hierarchy": {
+      "h1": "text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tighter",
+      "h2": "text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight",
+      "h3": "text-xl sm:text-2xl font-bold tracking-tight",
+      "body": "text-base text-gray-300",
+      "small": "text-sm text-gray-400 uppercase tracking-widest"
+    }
+  },
+  "colors": {
+    "background": {
+      "base": "#050505",
+      "surface": "#0A0A0C",
+      "elevated": "#121215",
+      "glass": "rgba(255, 255, 255, 0.03)",
+      "glass_heavy": "rgba(10, 10, 12, 0.7)"
+    },
+    "primary": {
+      "indigo": "#4F46E5",
+      "purple": "#9333EA",
+      "electric_blue": "#3B82F6"
+    },
+    "accent": {
+      "neon_green": "#22C55E",
+      "sky_blue": "#0EA5E9",
+      "white": "#FFFFFF"
+    },
+    "text": {
+      "primary": "#FFFFFF",
+      "secondary": "#A1A1AA",
+      "tertiary": "#71717A"
+    },
+    "borders": {
+      "subtle": "rgba(255, 255, 255, 0.08)",
+      "focus": "#4F46E5",
+      "glow": "rgba(147, 51, 234, 0.5)"
+    }
+  },
+  "visual_enhancers": {
+    "glassmorphism": "Use backdrop-blur-xl or backdrop-blur-2xl heavily. Base cards should have bg-white/5 or bg-black/60 with a border-white/10 to create a milled crystal look. DO NOT use fully transparent backgrounds for overlays.",
+    "gradients": "Avoid cheap two-color linear gradients. Use mesh gradients or radial blurs in the background for a soft, glowing aurora effect. E.g., absolute positioned div with bg-purple-600/20 blur-[120px].",
+    "borders": "1px inner stroke border-white/10 is mandatory on all glass cards to separate them from the background.",
+    "textures": "Apply a subtle noise/grain texture overlay (opacity 2-4%) across the entire app background to kill digital flatness and make it feel premium."
+  },
+  "components": {
+    "digital_student_card": {
+      "description": "The hero feature. Must feel like an Apple Wallet pass.",
+      "styles": "Rounded-3xl, immersive mesh gradient background (deep indigo fading to purple), 3D tilt effect on hover via framer-motion, glowing neon green verified badge. QR code must sit on a pristine white or frosted glass rounded-xl container. Add subtle noise texture.",
+      "interactions": "Hover causes slight 3D rotation and dynamic glare effect."
+    },
+    "buttons": {
+      "primary": "Pill-shaped (rounded-full). bg-white text-black font-bold hover:scale-105 transition-transform duration-200. For primary call-to-actions (e.g., Get Verified).",
+      "secondary": "Glass pill. bg-white/10 backdrop-blur-md border border-white/10 text-white hover:bg-white/20 transition-all.",
+      "accent": "bg-indigo-600 text-white shadow-[0_0_20px_rgba(79,70,229,0.4)] hover:shadow-[0_0_30px_rgba(79,70,229,0.6)]"
+    },
+    "navigation": {
+      "styles": "Floating pill nav at the top (margin-top 24px) or sticky crystal glass header. Must have bg-black/60 backdrop-blur-xl border border-white/10. NEVER fully transparent. Must be visible on desktop."
+    },
+    "offer_cards": {
+      "styles": "rounded-2xl bg-[#0A0A0C] border border-white/5 overflow-hidden group hover:border-white/20 transition-colors. Image takes up top 50%, bottom 50% is content.",
+      "interactions": "Image scales up slightly (scale-105) on group hover."
+    }
+  },
+  "grids_and_layouts": {
+    "general_spacing": "Generous. Use p-8, p-12 for sections. Container max-w-7xl mx-auto px-6.",
+    "bento_grid": "For the 'How it Works' or 'Features' section, use a highly asymmetrical bento grid. grid-cols-1 md:grid-cols-12 gap-6. Mix col-span-8, col-span-4, row-span-2.",
+    "dashboard_layout": "Sidebar navigation (glass effect) + main content area. High-density grids for data, but ample padding inside cards."
+  },
+  "motion": {
+    "library": "framer-motion",
+    "page_transitions": "Fade in with a slight upward translation (y: 20 to 0, opacity 0 to 1).",
+    "stagger_children": "Lists of offers or features must use staggerChildren (0.1s delay) so they flow in sequentially.",
+    "micro_interactions": "All interactive elements must scale down slightly on active/tap (scale 0.97).",
+    "scrolling": "Implement Lenis for smooth momentum scrolling on the landing page if applicable, else rely on Framer Motion viewport triggers."
+  },
+  "accessibility": {
+    "contrast": "Ensure text over gradients or images has sufficient contrast. Use text shadows if necessary.",
+    "focus_states": "All focusable elements must have focus:ring-2 focus:ring-indigo-500 focus:outline-none.",
+    "data_testid": "CRITICAL: All interactive and key informational elements MUST include a data-testid attribute in kebab-case. E.g., data-testid='verify-student-btn'."
+  },
+  "media": {
+    "images": {
+      "hero_lifestyle": {
+        "url": "https://images.pexels.com/photos/31968811/pexels-photo-31968811.jpeg",
+        "description": "Vibrant group of Indian college students celebrating, to be used in the hero section."
+      },
+      "cafe_offer": {
+        "url": "https://images.pexels.com/photos/34482998/pexels-photo-34482998.jpeg",
+        "description": "Premium coffee/cafe shot for Starbucks/Cafe Coffee Day offer thumbnail."
+      },
+      "gym_offer": {
+        "url": "https://images.pexels.com/photos/3888405/pexels-photo-3888405.jpeg",
+        "description": "Gen-Z focused gym workout lifestyle shot for fitness deals like Cult.fit."
+      }
+    },
+    "image_treatment": "Images in cards must have a max-height (e.g., h-48) and object-cover. Hero images should have a vignette or gradient overlay (bg-gradient-to-t from-black via-black/40 to-transparent) so text is highly legible."
+  },
+  "instructions_to_main_agent": [
+    "Build standard React (.js/.jsx) with Tailwind CSS. Do NOT use TypeScript.",
+    "Install and use 'framer-motion' for all animations, 'lucide-react' for UI icons.",
+    "For brand logos (Spotify, Nike, Apple), use Lucide icons in a sleek circular container or SVG logos if you can generate the path. Do not use plain text.",
+    "Install and configure 'sonner' for all toast notifications.",
+    "Do NOT build generic corporate layouts. Prioritize asymmetry, deep shadows, glow effects, and generous spacing.",
+    "The Digital Student Card MUST be a visually distinct, premium component using 3D rotation, holographic gradients, and a clear QR code placeholder.",
+    "Ensure the theme is locked to Dark Mode by default, applying bg-black and text-white at the root."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "Do not converge toward generic outputs ('AI slop'). Use creative, distinctive layouts.",
+    "Never apply 'transition: all'. Apply transitions to specific properties (e.g., transform, opacity).",
+    "Never center align the app container text via `.App { text-align: center; }`.",
+    "Use pill-shaped or sharp button styles; never default rectangular buttons without styling.",
+    "Never use AI emoji characters (🤖🧠💡) for icons.",
+    "Every interaction needs micro-animations (hover states, focus states).",
+    "Use 2-3x more spacing than feels comfortable.",
+    "Prioritize using existing Shadcn components and customize them to fit the 'Luxurious Gen-Z Dark Mode' aesthetic."
+  ]
+}
