@@ -181,8 +181,12 @@ def validate_password(pw: str) -> None:
         raise HTTPException(400, "Password must be at least 8 characters long.")
     if not re.search(r"[A-Z]", pw):
         raise HTTPException(400, "Password must include at least one uppercase letter.")
-    if not re.search(r"[^A-Za-z0-9]", pw):
+    if not re.search(r"[0-9]", pw):
+        raise HTTPException(400, "Password must include at least one digit.")
+    if not re.search(r"[^A-Za-z0-9\s]", pw):
         raise HTTPException(400, "Password must include at least one special character.")
+    if re.search(r"\s", pw):
+        raise HTTPException(400, "Password must not contain spaces.")
 
 
 def gen_ref_code(name: str) -> str:

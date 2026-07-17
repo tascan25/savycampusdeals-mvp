@@ -1,21 +1,41 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowRight, Sparkles, Loader2, Check, X } from "lucide-react";
+import { ArrowRight, Sparkles, Loader2, Check, X, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
 
 const passwordChecks = (pw) => ({
   length: pw.length >= 8,
   upper: /[A-Z]/.test(pw),
-  special: /[^A-Za-z0-9]/.test(pw),
+  digit: /[0-9]/.test(pw),
+  special: /[^A-Za-z0-9\s]/.test(pw),
+  noSpace: pw.length > 0 && !/\s/.test(pw),
 });
-const isPasswordValid = (pw) => {
+
+// Score: 0..5 based on rule pass count + a small bonus for length ≥ 12
+const passwordScore = (pw) => {
   const c = passwordChecks(pw);
-  return c.length && c.upper && c.special;
+  const passed = [c.length, c.upper, c.digit, c.special, c.noSpace].filter(Boolean).length;
+  if (passed === 0) return 0;
+  const long = pw.length >= 12 ? 0.5 : 0;
+  return Math.min(5, passed + long);
 };
 
-function Check01({ ok, children, testId }) {
+const strengthMeta = (score) => {
+  if (score <= 1) return { label: "Too weak", tint: "bg-red-500", text: "text-red-300", segments: 1 };
+  if (score <= 2) return { label: "Weak", tint: "bg-orange-500", text: "text-orange-300", segments: 2 };
+  if (score <= 3) return { label: "Fair", tint: "bg-amber-400", text: "text-amber-300", segments: 3 };
+  if (score < 5) return { label: "Good", tint: "bg-blue-400", text: "text-blue-300", segments: 4 };
+  return { label: "Strong", tint: "bg-emerald-400", text: "text-emerald-300", segments: 5 };
+};
+
+const isPasswordValid = (pw) => {
+  const c = passwordChecks(pw);
+  return c.length && c.upper && c.digit && c.special && c.noSpace;
+};
+
+function Rule({ ok, children, testId }) {
   return (
     <li
       data-testid={testId}
@@ -29,10 +49,32 @@ function Check01({ ok, children, testId }) {
   );
 }
 
+function StrengthMeter({ score, testId }) {
+  const meta = strengthMeta(score);
+  return (
+    <div className="mt-3" data-testid={testId}>
+      <div className="flex gap-1.5">
+        {[0, 1, 2, 3, 4].map((i) => (
+          <div
+            key={i}
+            className={`h-1.5 flex-1 rounded-full transition-colors ${i < meta.segments ? meta.tint : "bg-white/10"}`}
+          />
+        ))}
+      </div>
+      <div className="mt-1.5 flex items-center justify-between text-[11px]">
+        <span className={`font-semibold ${meta.text}`} data-testid={`${testId}-label`}>{score === 0 ? "—" : meta.label}</span>
+        <span className="text-zinc-500">Strength</span>
+      </div>
+    </div>
+  );
+}
+
 export default function Signup() {
   const { register } = useAuth();
   const nav = useNavigate();
-  const [f, setF] = useState({ name: "", email: "", password: "", college: "", course: "", year: "", referral_code: "" });
+  const [f, setF] = useState({ name: "", email: "", password: "", confirm_password: "", college: "", course: "", year: "", referral_code: "" });
+  const [showPw, setShowPw] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [pwFocused, setPwFocused] = useState(false);
@@ -40,13 +82,20 @@ export default function Signup() {
   const update = (k) => (e) => setF((prev) => ({ ...prev, [k]: e.target.value }));
   const pwCheck = passwordChecks(f.password);
   const pwValid = isPasswordValid(f.password);
+  const pwScore = passwordScore(f.password);
+  const confirmTouched = f.confirm_password.length > 0;
+  const confirmMatches = confirmTouched && f.confirm_password === f.password;
+  const canSubmit = pwValid && confirmMatches;
 
   const onSubmit = async (e) => {
     e.preventDefault();
     setErr("");
     if (!pwValid) { setErr("Please meet all password requirements."); return; }
+    if (!confirmMatches) { setErr("Passwords do not match."); return; }
     setLoading(true);
-    const r = await register(f);
+    // Strip confirm_password before sending
+    const { confirm_password, ...payload } = f;
+    const r = await register(payload);
     setLoading(false);
     if (r.ok) {
       toast.success("Account created! Check your inbox for a verification code.");
@@ -90,35 +139,88 @@ export default function Signup() {
             </div>
           ))}
 
-          {/* Password with live checklist */}
+          {/* Password */}
           <div className="md:col-span-2">
             <label className="text-xs uppercase tracking-widest text-zinc-500">Password</label>
-            <input
-              data-testid="signup-password-input"
-              type="password"
-              required
-              value={f.password}
-              onChange={update("password")}
-              onFocus={() => setPwFocused(true)}
-              onBlur={() => setPwFocused(false)}
-              className={`mt-2 w-full rounded-xl bg-white/5 border px-4 py-3 text-white focus:ring-2 focus:outline-none transition-colors ${
-                f.password.length === 0
-                  ? "border-white/10 focus:border-indigo-400 focus:ring-indigo-500/40"
-                  : pwValid
-                  ? "border-emerald-400/50 focus:ring-emerald-500/40"
-                  : "border-amber-400/40 focus:ring-amber-500/30"
-              }`}
-            />
-            {(pwFocused || f.password.length > 0) && (
-              <motion.ul
-                initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }}
-                className="mt-3 rounded-xl bg-white/5 border border-white/10 p-3 space-y-1.5 overflow-hidden"
-                data-testid="signup-password-checklist"
+            <div className="relative mt-2">
+              <input
+                data-testid="signup-password-input"
+                type={showPw ? "text" : "password"}
+                required
+                value={f.password}
+                onChange={update("password")}
+                onFocus={() => setPwFocused(true)}
+                onBlur={() => setPwFocused(false)}
+                className={`w-full rounded-xl bg-white/5 border pl-4 pr-11 py-3 text-white focus:ring-2 focus:outline-none transition-colors ${
+                  f.password.length === 0
+                    ? "border-white/10 focus:border-indigo-400 focus:ring-indigo-500/40"
+                    : pwValid
+                    ? "border-emerald-400/50 focus:ring-emerald-500/40"
+                    : "border-amber-400/40 focus:ring-amber-500/30"
+                }`}
+              />
+              <button
+                type="button"
+                data-testid="signup-password-toggle"
+                onClick={() => setShowPw((s) => !s)}
+                className="absolute inset-y-0 right-3 my-auto h-fit text-zinc-400 hover:text-white"
               >
-                <Check01 ok={pwCheck.length} testId="pw-check-length">At least 8 characters</Check01>
-                <Check01 ok={pwCheck.upper} testId="pw-check-upper">One uppercase letter (A–Z)</Check01>
-                <Check01 ok={pwCheck.special} testId="pw-check-special">One special character (e.g. ! @ # $ %)</Check01>
-              </motion.ul>
+                {showPw ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
+
+            {(pwFocused || f.password.length > 0) && (
+              <>
+                <StrengthMeter score={pwScore} testId="signup-strength" />
+                <motion.ul
+                  initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }}
+                  className="mt-3 rounded-xl bg-white/5 border border-white/10 p-3 space-y-1.5 overflow-hidden"
+                  data-testid="signup-password-checklist"
+                >
+                  <Rule ok={pwCheck.length} testId="pw-check-length">At least 8 characters</Rule>
+                  <Rule ok={pwCheck.upper} testId="pw-check-upper">One uppercase letter (A–Z)</Rule>
+                  <Rule ok={pwCheck.digit} testId="pw-check-digit">One digit (0–9)</Rule>
+                  <Rule ok={pwCheck.special} testId="pw-check-special">One special character (e.g. ! @ # $ %)</Rule>
+                  <Rule ok={pwCheck.noSpace} testId="pw-check-nospace">No spaces</Rule>
+                </motion.ul>
+              </>
+            )}
+          </div>
+
+          {/* Confirm password */}
+          <div className="md:col-span-2">
+            <label className="text-xs uppercase tracking-widest text-zinc-500">Confirm password</label>
+            <div className="relative mt-2">
+              <input
+                data-testid="signup-confirm-password-input"
+                type={showConfirm ? "text" : "password"}
+                required
+                value={f.confirm_password}
+                onChange={update("confirm_password")}
+                className={`w-full rounded-xl bg-white/5 border pl-4 pr-11 py-3 text-white focus:ring-2 focus:outline-none transition-colors ${
+                  !confirmTouched
+                    ? "border-white/10 focus:border-indigo-400 focus:ring-indigo-500/40"
+                    : confirmMatches
+                    ? "border-emerald-400/50 focus:ring-emerald-500/40"
+                    : "border-red-400/50 focus:ring-red-500/30"
+                }`}
+              />
+              <button
+                type="button"
+                data-testid="signup-confirm-toggle"
+                onClick={() => setShowConfirm((s) => !s)}
+                className="absolute inset-y-0 right-3 my-auto h-fit text-zinc-400 hover:text-white"
+              >
+                {showConfirm ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
+            {confirmTouched && !confirmMatches && (
+              <div className="mt-2 text-xs text-red-400" data-testid="signup-confirm-mismatch">Passwords do not match.</div>
+            )}
+            {confirmTouched && confirmMatches && (
+              <div className="mt-2 text-xs text-emerald-300 inline-flex items-center gap-1" data-testid="signup-confirm-match">
+                <Check size={12} strokeWidth={3}/> Passwords match
+              </div>
             )}
           </div>
 
@@ -143,7 +245,7 @@ export default function Signup() {
           {err && <div data-testid="signup-error" className="md:col-span-2 text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{err}</div>}
           <button
             data-testid="signup-submit-btn"
-            disabled={loading || !pwValid}
+            disabled={loading || !canSubmit}
             className="md:col-span-2 w-full inline-flex items-center justify-center gap-2 rounded-full bg-white text-black font-semibold py-3 hover:scale-[1.02] active:scale-[0.98] transition-transform disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? <Loader2 size={16} className="animate-spin" /> : <>Create account <ArrowRight size={14} /></>}
