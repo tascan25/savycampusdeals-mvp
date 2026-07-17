@@ -50,51 +50,84 @@ function ResultCard({ result, onRedeem, onClose, redeeming }) {
 
   if (result.kind === "coupon") {
     const active = result.status === "active" && !result.expired;
+    const studentOk = result.student_verified && !result.student_expiry_expired;
+    const initial = (result.student_name || "?")[0].toUpperCase();
     return (
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-heavy rounded-3xl p-6 max-w-md w-full relative" data-testid="scan-coupon-result">
         <button onClick={onClose} className="absolute top-4 right-4 text-zinc-400 hover:text-white"><X size={18}/></button>
+
+        {/* Student verification is now the hero of the coupon result */}
         <div className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold border ${
-          active ? "bg-emerald-500/15 text-emerald-300 border-emerald-400/30"
-          : result.status === "redeemed" ? "bg-zinc-500/15 text-zinc-300 border-zinc-400/30"
+          studentOk ? "bg-emerald-500/15 text-emerald-300 border-emerald-400/30"
           : "bg-red-500/15 text-red-300 border-red-400/30"
         }`}>
-          {active ? <Ticket size={14}/> : result.status === "redeemed" ? <CheckCircle2 size={14}/> : <ShieldAlert size={14}/>}
-          {active ? "Active coupon" : result.status === "redeemed" ? "Already redeemed" : "Expired"}
+          {studentOk ? <BadgeCheck size={14}/> : <ShieldAlert size={14}/>}
+          {studentOk ? "Verified SavyCampusDeals member" : result.student_expiry_expired ? "Pass expired" : "Not verified"}
         </div>
-        <div className="mt-4">
-          <div className="text-[10px] uppercase tracking-widest text-zinc-500">Brand · Offer</div>
-          <div className="font-display text-2xl font-extrabold" data-testid="scan-coupon-brand">{result.brand}</div>
-          <div className="text-sm text-zinc-400">{result.offer_title}</div>
-          <div className="mt-3 rounded-xl bg-white/5 border border-white/10 p-3 flex items-center justify-between">
-            <span className="font-mono font-bold" data-testid="scan-coupon-code">{result.code}</span>
-            <span className="text-2xl font-extrabold font-display">{result.discount}</span>
+
+        <div className="mt-4 flex items-center gap-3">
+          <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 grid place-items-center font-display font-extrabold text-2xl text-white">
+            {initial}
           </div>
-          <div className="mt-4 grid grid-cols-2 gap-4">
-            <div>
-              <div className="text-[10px] uppercase tracking-widest text-zinc-500">Student</div>
-              <div className="text-sm text-white">{result.student_name || "—"}</div>
-            </div>
-            <div>
-              <div className="text-[10px] uppercase tracking-widest text-zinc-500">Student ID</div>
-              <div className="font-mono text-sm text-white">{result.student_number || "—"}</div>
-            </div>
+          <div className="min-w-0">
+            <div className="font-display text-xl font-extrabold truncate" data-testid="scan-coupon-student-name">{result.student_name || "—"}</div>
+            <div className="text-sm text-zinc-400 truncate">{result.student_college || result.student_email || "—"}</div>
           </div>
-          {active && (
-            <button
-              data-testid="scan-redeem-btn"
-              disabled={redeeming}
-              onClick={onRedeem}
-              className="mt-6 w-full inline-flex items-center justify-center gap-2 rounded-full bg-white text-black font-semibold py-3 hover:scale-[1.02] transition-transform disabled:opacity-60"
-            >
-              {redeeming ? <Loader2 size={16} className="animate-spin"/> : <><CheckCircle2 size={16}/> Mark as redeemed</>}
-            </button>
-          )}
-          {!active && (
-            <div className="mt-6 text-center text-sm text-zinc-500">
-              {result.status === "redeemed" ? `Redeemed on ${new Date(result.redeemed_at).toLocaleString()}` : "This coupon cannot be redeemed."}
-            </div>
-          )}
         </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          <div className="rounded-xl bg-white/5 border border-white/10 p-3">
+            <div className="text-[10px] uppercase tracking-widest text-zinc-500">Course · Year</div>
+            <div className="text-sm text-white mt-1">{[result.student_course, result.student_year].filter(Boolean).join(" · ") || "—"}</div>
+          </div>
+          <div className="rounded-xl bg-white/5 border border-white/10 p-3">
+            <div className="text-[10px] uppercase tracking-widest text-zinc-500">Student ID</div>
+            <div className="font-mono text-sm text-white mt-1" data-testid="scan-coupon-student-number">{result.student_number || "—"}</div>
+          </div>
+          <div className="col-span-2 rounded-xl bg-white/5 border border-white/10 p-3">
+            <div className="text-[10px] uppercase tracking-widest text-zinc-500">Pass valid till</div>
+            <div className="text-sm text-white mt-1">
+              {result.student_expiry ? new Date(result.student_expiry).toLocaleDateString("en-IN", { month: "short", year: "numeric", day: "numeric" }) : "—"}
+            </div>
+          </div>
+        </div>
+
+        {/* Coupon summary (secondary) */}
+        <div className="mt-5 rounded-xl border border-white/10 bg-black/30 p-3 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-[10px] uppercase tracking-widest text-indigo-300 flex items-center gap-1">
+              {active ? <Ticket size={11}/> : result.status === "redeemed" ? <CheckCircle2 size={11}/> : <ShieldAlert size={11}/>}
+              {active ? "Active coupon" : result.status === "redeemed" ? "Already redeemed" : "Expired coupon"}
+            </div>
+            <div className="text-sm font-semibold truncate" data-testid="scan-coupon-brand">{result.brand}</div>
+            <div className="text-xs text-zinc-400 truncate">{result.offer_title}</div>
+          </div>
+          <div className="text-right shrink-0">
+            <div className="font-display text-xl font-extrabold">{result.discount}</div>
+            <div className="font-mono text-[10px] text-zinc-500 mt-0.5" data-testid="scan-coupon-code">{result.code}</div>
+          </div>
+        </div>
+
+        {active && studentOk && (
+          <button
+            data-testid="scan-redeem-btn"
+            disabled={redeeming}
+            onClick={onRedeem}
+            className="mt-6 w-full inline-flex items-center justify-center gap-2 rounded-full bg-white text-black font-semibold py-3 hover:scale-[1.02] transition-transform disabled:opacity-60"
+          >
+            {redeeming ? <Loader2 size={16} className="animate-spin"/> : <><CheckCircle2 size={16}/> Approve & mark as redeemed</>}
+          </button>
+        )}
+        {active && !studentOk && (
+          <div className="mt-6 rounded-xl bg-red-500/10 border border-red-400/30 text-red-200 text-sm text-center p-3">
+            Do not approve — the student is not verified.
+          </div>
+        )}
+        {!active && (
+          <div className="mt-6 text-center text-sm text-zinc-500">
+            {result.status === "redeemed" ? `Redeemed on ${new Date(result.redeemed_at).toLocaleString()}` : "This coupon cannot be redeemed."}
+          </div>
+        )}
       </motion.div>
     );
   }

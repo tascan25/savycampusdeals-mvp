@@ -1,0 +1,28 @@
+{
+  "summary": "Iteration 4 (password rules + referral rewards + expanded scan/lookup coupon fields + restructured coupon result card) fully validated. Backend pytest: 10/10 passing. Frontend Playwright: signup checklist (data-testid signup-password-checklist, pw-check-length, pw-check-upper, pw-check-special) toggles correctly, submit button disabled with 'abc' & amber border, enabled with 'Test@1234' & emerald border, invalid referral 'BADCODE99' surfaces backend error. /scan manual mode renders new coupon result card with Verified SavyCampusDeals member hero badge, student name+college+course/year/ID/pass-valid-till, secondary coupon summary (brand+discount+code) and Approve & mark as redeemed CTA.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration4.py",
+    "/app/test_reports/pytest/iteration_4.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py now ~1450 lines — well past the 700-line split threshold. Split into routers: auth, offers, outlets, coupons, scan, verification.",
+    "Referral system has no self-referral guard: if a user knew a valid code and manipulated the client to send their OWN referral_code before registration, the code check would still pass since they don't exist yet. Low risk but worth an explicit check that referrer._id != new user (trivially true today) — leaves open referral farming with disposable emails though (no anti-abuse cap).",
+    "No cap on referral bonuses per referrer — a single referral_code could be spammed across N throwaway signups to farm points.",
+    "validate_password + Pydantic min_length=8 duplicate the length check; consider dropping min_length in favour of the richer HTTPException 400 with a clear message (current: len=3 -> 422 pydantic, len=8 no upper -> 400 friendly).",
+    "PASSWORD_RE constant is defined but never used; validate_password re-implements the checks. Dead code — remove.",
+    "OTP still lacks brute-force protection (carried over from iter 3).",
+    "Referrer bonus email is sent synchronously inside register() — will delay the response if Resend is slow or times out; move to a background task."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration4.py (new)"
+  ],
+  "success_rate": {"backend": "100% (10/10)", "frontend": "100% (signup checklist + referral error + scan coupon result card all pass)"},
+  "test_credentials": "Admin: admin@savycampusdeals.in / Admin@123. Test students created dynamically with password 'Test@1234'. OTP via dev_otp field on /register response OR mongo: db.getSiblingDB('savycampusdeals').otp_codes.findOne({email:'..',used:false}).otp",
+  "seed_data_creation": "No manual seeding required — startup handles 14 brand offers + 6 outlets. Tests use TEST_iter4_ prefix.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iteration 4 passes cleanly end-to-end. Referrer_email lookup in mongo is stored lowercase — use .lower() when querying db.referrals. All new expanded scan/lookup coupon fields (student_college, student_course, student_year, student_avatar_url, student_email, student_expiry, student_expiry_expired) verified. Signup submit button uses disabled attribute based on client-side pwValid, so tests should Fill password before clicking submit."
+}

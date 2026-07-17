@@ -171,6 +171,20 @@ def generate_qr_data_uri(payload: str) -> str:
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
+import re
+
+PASSWORD_RE = re.compile(r"^(?=.*[A-Z])(?=.*[^A-Za-z0-9]).{8,}$")
+
+
+def validate_password(pw: str) -> None:
+    if len(pw) < 8:
+        raise HTTPException(400, "Password must be at least 8 characters long.")
+    if not re.search(r"[A-Z]", pw):
+        raise HTTPException(400, "Password must include at least one uppercase letter.")
+    if not re.search(r"[^A-Za-z0-9]", pw):
+        raise HTTPException(400, "Password must include at least one special character.")
+
+
 def gen_ref_code(name: str) -> str:
     stub = "".join(c for c in name.upper() if c.isalpha())[:4] or "SAVY"
     return f"{stub}{secrets.token_hex(2).upper()}"
@@ -186,7 +200,7 @@ def gen_student_number() -> str:
 class RegisterIn(BaseModel):
     name: str = Field(min_length=2)
     email: EmailStr
-    password: str = Field(min_length=6)
+    password: str = Field(min_length=8)
     college: Optional[str] = ""
     course: Optional[str] = ""
     year: Optional[str] = ""
@@ -205,7 +219,7 @@ class ForgotIn(BaseModel):
 
 class ResetIn(BaseModel):
     token: str
-    password: str = Field(min_length=6)
+    password: str = Field(min_length=8)
 
 
 class ProfileUpdateIn(BaseModel):
@@ -240,13 +254,24 @@ class OtpResendIn(BaseModel):
 # -----------------------------
 @api.post("/auth/register")
 async def register(body: RegisterIn, response: Response):
+    validate_password(body.password)
     email = body.email.lower().strip()
     existing = await db.users.find_one({"email": email})
     if existing:
         raise HTTPException(400, "Email already registered")
 
+    # Look up referrer if a code was provided
+    ref_code_raw = (body.referral_code or "").strip().upper()
+    referrer = None
+    if ref_code_raw:
+        referrer = await db.users.find_one({"referral_code": ref_code_raw})
+        if not referrer:
+            raise HTTPException(400, f"Referral code '{ref_code_raw}' is not valid.")
+
     now = datetime.now(timezone.utc)
     verify_token = secrets.token_urlsafe(24)
+    welcome_points = 100
+    referral_bonus = 200 if referrer else 0
     user_doc = {
         "email": email,
         "password_hash": hash_password(body.password),
@@ -259,16 +284,38 @@ async def register(body: RegisterIn, response: Response):
         "avatar_url": "",
         "email_verified": False,
         "email_verify_token": verify_token,
-        "verification_status": "unverified",  # unverified | pending | approved | rejected
+        "verification_status": "unverified",
         "student_number": "",
         "verification_expiry": None,
-        "reward_points": 100,  # welcome bonus
+        "reward_points": welcome_points + referral_bonus,
         "referral_code": gen_ref_code(body.name),
-        "referred_by": body.referral_code or "",
+        "referred_by": ref_code_raw if referrer else "",
+        "referrer_id": referrer["_id"] if referrer else None,
         "created_at": now,
     }
     result = await db.users.insert_one(user_doc)
     user_doc["_id"] = result.inserted_id
+
+    # Reward the referrer + log the referral event
+    if referrer:
+        await db.users.update_one({"_id": referrer["_id"]}, {"$inc": {"reward_points": 200}})
+        await db.referrals.insert_one({
+            "referrer_id": referrer["_id"],
+            "referrer_email": referrer["email"],
+            "referred_id": result.inserted_id,
+            "referred_email": email,
+            "points_awarded": 200,
+            "created_at": now,
+        })
+        # Bonus notification email (best-effort)
+        send_email(
+            referrer["email"],
+            "You just earned 200 SavyPoints",
+            f"""<div style="font-family:Manrope,Arial,sans-serif;background:#050505;color:#fff;padding:32px;border-radius:16px;max-width:520px;margin:auto">
+            <h1 style="font-family:Outfit,sans-serif;font-weight:800">+200 SavyPoints</h1>
+            <p>{body.name.split(' ')[0]} just joined SavyCampusDeals using your code <b>{ref_code_raw}</b>. 200 points added to your account.</p>
+            </div>""",
+        )
 
     # Generate and send OTP (6-digit)
     otp = f"{secrets.randbelow(1000000):06d}"
@@ -426,6 +473,7 @@ async def forgot(body: ForgotIn):
 
 @api.post("/auth/reset-password")
 async def reset(body: ResetIn):
+    validate_password(body.password)
     doc = await db.password_resets.find_one({"token": body.token, "used": False})
     if not doc or _aware(doc["expires_at"]) < datetime.now(timezone.utc):
         raise HTTPException(400, "Invalid or expired token")
@@ -927,6 +975,7 @@ async def scan_lookup(body: ScanIn):
             raise HTTPException(404, "Coupon not found")
         offer = await db.offers.find_one({"_id": c["offer_id"]})
         user = await db.users.find_one({"_id": c["user_id"]})
+        student_expiry = (user or {}).get("verification_expiry")
         return {
             "kind": "coupon",
             "code": c["code"],
@@ -936,9 +985,17 @@ async def scan_lookup(body: ScanIn):
             "brand": (offer or {}).get("brand", ""),
             "discount": (offer or {}).get("discount", ""),
             "outlet_id": str(offer.get("outlet_id")) if offer and offer.get("outlet_id") else None,
+            # Student info surfaced prominently so restaurant staff can trust the claim
             "student_name": (user or {}).get("name", ""),
             "student_number": (user or {}).get("student_number", ""),
+            "student_email": (user or {}).get("email", ""),
+            "student_college": (user or {}).get("college", ""),
+            "student_course": (user or {}).get("course", ""),
+            "student_year": (user or {}).get("year", ""),
+            "student_avatar_url": (user or {}).get("avatar_url", ""),
             "student_verified": (user or {}).get("verification_status") == "approved",
+            "student_expiry": student_expiry.isoformat() if student_expiry else None,
+            "student_expiry_expired": bool(student_expiry and _aware(student_expiry) < datetime.now(timezone.utc)),
             "redeemed_at": c["redeemed_at"].isoformat() if c.get("redeemed_at") else None,
         }
 

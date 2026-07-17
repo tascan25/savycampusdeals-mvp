@@ -1,9 +1,33 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowRight, Sparkles, Loader2 } from "lucide-react";
+import { ArrowRight, Sparkles, Loader2, Check, X } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
+
+const passwordChecks = (pw) => ({
+  length: pw.length >= 8,
+  upper: /[A-Z]/.test(pw),
+  special: /[^A-Za-z0-9]/.test(pw),
+});
+const isPasswordValid = (pw) => {
+  const c = passwordChecks(pw);
+  return c.length && c.upper && c.special;
+};
+
+function Check01({ ok, children, testId }) {
+  return (
+    <li
+      data-testid={testId}
+      className={`flex items-center gap-2 text-xs transition-colors ${ok ? "text-emerald-300" : "text-zinc-500"}`}
+    >
+      <span className={`h-4 w-4 rounded-full grid place-items-center border ${ok ? "bg-emerald-500/20 border-emerald-400/40" : "bg-white/5 border-white/10"}`}>
+        {ok ? <Check size={10} strokeWidth={3} /> : <X size={10} strokeWidth={3} className="text-zinc-600" />}
+      </span>
+      {children}
+    </li>
+  );
+}
 
 export default function Signup() {
   const { register } = useAuth();
@@ -11,12 +35,16 @@ export default function Signup() {
   const [f, setF] = useState({ name: "", email: "", password: "", college: "", course: "", year: "", referral_code: "" });
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+  const [pwFocused, setPwFocused] = useState(false);
 
   const update = (k) => (e) => setF((prev) => ({ ...prev, [k]: e.target.value }));
+  const pwCheck = passwordChecks(f.password);
+  const pwValid = isPasswordValid(f.password);
 
   const onSubmit = async (e) => {
     e.preventDefault();
     setErr("");
+    if (!pwValid) { setErr("Please meet all password requirements."); return; }
     setLoading(true);
     const r = await register(f);
     setLoading(false);
@@ -37,7 +65,7 @@ export default function Signup() {
       >
         <Link to="/" className="inline-flex items-center gap-2 mb-6">
           <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-indigo-500 via-purple-500 to-blue-500 grid place-items-center">
-            <Sparkles size={16} className="text-white"/>
+            <Sparkles size={16} className="text-white" />
           </div>
           <span className="font-display font-bold text-lg">Savy<span className="text-indigo-400">.</span></span>
         </Link>
@@ -48,11 +76,6 @@ export default function Signup() {
           {[
             { k: "name", label: "Full name", type: "text", required: true, span: 2 },
             { k: "email", label: "Email", type: "email", required: true, span: 2 },
-            { k: "password", label: "Password (min 6 chars)", type: "password", required: true, span: 2 },
-            { k: "college", label: "College", type: "text" },
-            { k: "course", label: "Course", type: "text" },
-            { k: "year", label: "Year", type: "text" },
-            { k: "referral_code", label: "Referral code (optional)", type: "text" },
           ].map((field) => (
             <div key={field.k} className={field.span === 2 ? "md:col-span-2" : ""}>
               <label className="text-xs uppercase tracking-widest text-zinc-500">{field.label}</label>
@@ -66,13 +89,64 @@ export default function Signup() {
               />
             </div>
           ))}
+
+          {/* Password with live checklist */}
+          <div className="md:col-span-2">
+            <label className="text-xs uppercase tracking-widest text-zinc-500">Password</label>
+            <input
+              data-testid="signup-password-input"
+              type="password"
+              required
+              value={f.password}
+              onChange={update("password")}
+              onFocus={() => setPwFocused(true)}
+              onBlur={() => setPwFocused(false)}
+              className={`mt-2 w-full rounded-xl bg-white/5 border px-4 py-3 text-white focus:ring-2 focus:outline-none transition-colors ${
+                f.password.length === 0
+                  ? "border-white/10 focus:border-indigo-400 focus:ring-indigo-500/40"
+                  : pwValid
+                  ? "border-emerald-400/50 focus:ring-emerald-500/40"
+                  : "border-amber-400/40 focus:ring-amber-500/30"
+              }`}
+            />
+            {(pwFocused || f.password.length > 0) && (
+              <motion.ul
+                initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }}
+                className="mt-3 rounded-xl bg-white/5 border border-white/10 p-3 space-y-1.5 overflow-hidden"
+                data-testid="signup-password-checklist"
+              >
+                <Check01 ok={pwCheck.length} testId="pw-check-length">At least 8 characters</Check01>
+                <Check01 ok={pwCheck.upper} testId="pw-check-upper">One uppercase letter (A–Z)</Check01>
+                <Check01 ok={pwCheck.special} testId="pw-check-special">One special character (e.g. ! @ # $ %)</Check01>
+              </motion.ul>
+            )}
+          </div>
+
+          {[
+            { k: "college", label: "College", type: "text" },
+            { k: "course", label: "Course", type: "text" },
+            { k: "year", label: "Year", type: "text" },
+            { k: "referral_code", label: "Referral code (optional — earn +200 pts)", type: "text" },
+          ].map((field) => (
+            <div key={field.k}>
+              <label className="text-xs uppercase tracking-widest text-zinc-500">{field.label}</label>
+              <input
+                data-testid={`signup-${field.k}-input`}
+                type={field.type}
+                value={f[field.k]}
+                onChange={update(field.k)}
+                className="mt-2 w-full rounded-xl bg-white/5 border border-white/10 px-4 py-3 text-white focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/40 focus:outline-none transition-colors"
+              />
+            </div>
+          ))}
+
           {err && <div data-testid="signup-error" className="md:col-span-2 text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{err}</div>}
           <button
             data-testid="signup-submit-btn"
-            disabled={loading}
-            className="md:col-span-2 w-full inline-flex items-center justify-center gap-2 rounded-full bg-white text-black font-semibold py-3 hover:scale-[1.02] active:scale-[0.98] transition-transform disabled:opacity-60"
+            disabled={loading || !pwValid}
+            className="md:col-span-2 w-full inline-flex items-center justify-center gap-2 rounded-full bg-white text-black font-semibold py-3 hover:scale-[1.02] active:scale-[0.98] transition-transform disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {loading ? <Loader2 size={16} className="animate-spin"/> : <>Create account <ArrowRight size={14}/></>}
+            {loading ? <Loader2 size={16} className="animate-spin" /> : <>Create account <ArrowRight size={14} /></>}
           </button>
         </form>
         <div className="mt-6 text-sm text-zinc-400 text-center">
