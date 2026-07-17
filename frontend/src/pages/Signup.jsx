@@ -228,7 +228,7 @@ export default function Signup() {
             { k: "college", label: "College", type: "text" },
             { k: "course", label: "Course", type: "text" },
             { k: "year", label: "Year", type: "text" },
-            { k: "referral_code", label: "Referral code (optional — earn +200 pts)", type: "text" },
+            { k: "referral_code", label: "Referral code (optional)", type: "text" },
           ].map((field) => (
             <div key={field.k}>
               <label className="text-xs uppercase tracking-widest text-zinc-500">{field.label}</label>

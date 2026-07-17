@@ -275,7 +275,7 @@ async def register(body: RegisterIn, response: Response):
     now = datetime.now(timezone.utc)
     verify_token = secrets.token_urlsafe(24)
     welcome_points = 100
-    referral_bonus = 200 if referrer else 0
+    referral_bonus = 100 if referrer else 0
     user_doc = {
         "email": email,
         "password_hash": hash_password(body.password),
@@ -302,22 +302,22 @@ async def register(body: RegisterIn, response: Response):
 
     # Reward the referrer + log the referral event
     if referrer:
-        await db.users.update_one({"_id": referrer["_id"]}, {"$inc": {"reward_points": 200}})
+        await db.users.update_one({"_id": referrer["_id"]}, {"$inc": {"reward_points": 100}})
         await db.referrals.insert_one({
             "referrer_id": referrer["_id"],
             "referrer_email": referrer["email"],
             "referred_id": result.inserted_id,
             "referred_email": email,
-            "points_awarded": 200,
+            "points_awarded": 100,
             "created_at": now,
         })
         # Bonus notification email (best-effort)
         send_email(
             referrer["email"],
-            "You just earned 200 SavyPoints",
+            "You just earned 100 SavyPoints",
             f"""<div style="font-family:Manrope,Arial,sans-serif;background:#050505;color:#fff;padding:32px;border-radius:16px;max-width:520px;margin:auto">
-            <h1 style="font-family:Outfit,sans-serif;font-weight:800">+200 SavyPoints</h1>
-            <p>{body.name.split(' ')[0]} just joined SavyCampusDeals using your code <b>{ref_code_raw}</b>. 200 points added to your account.</p>
+            <h1 style="font-family:Outfit,sans-serif;font-weight:800">+100 SavyPoints</h1>
+            <p>{body.name.split(' ')[0]} just joined SavyCampusDeals using your code <b>{ref_code_raw}</b>. 100 points added to your account.</p>
             </div>""",
         )
 
