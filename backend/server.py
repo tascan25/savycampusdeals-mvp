@@ -1,5 +1,6 @@
 from dotenv import load_dotenv
 from pathlib import Path
+import certifi
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -17,10 +18,22 @@ import jwt
 import qrcode
 import resend
 from bson import ObjectId
-from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, UploadFile, File, Form, Query
+from fastapi import (
+    FastAPI,
+    APIRouter,
+    HTTPException,
+    Request,
+    Response,
+    Depends,
+    UploadFile,
+    File,
+    Form,
+    Query,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, EmailStr, Field
+from utils.json_loader import load_data
 
 # -----------------------------
 # Setup
@@ -38,7 +51,11 @@ FROM_EMAIL = os.environ.get("FROM_EMAIL", "onboarding@resend.dev")
 
 resend.api_key = RESEND_API_KEY
 
-client = AsyncIOMotorClient(MONGO_URL)
+client = AsyncIOMotorClient(
+    MONGO_URL,
+    tls=True,
+    tlsCAFile=certifi.where(),
+)
 db = client[DB_NAME]
 
 app = FastAPI(title="SavyCampusDeals API")
@@ -153,7 +170,12 @@ def send_email(to: str, subject: str, html: str) -> dict:
         return {"ok": False, "error": "no_api_key"}
     try:
         resend.Emails.send(
-            {"from": f"SavyCampusDeals <{FROM_EMAIL}>", "to": [to], "subject": subject, "html": html}
+            {
+                "from": f"SavyCampusDeals <{FROM_EMAIL}>",
+                "to": [to],
+                "subject": subject,
+                "html": html,
+            }
         )
         return {"ok": True, "error": None}
     except Exception as e:
@@ -162,7 +184,9 @@ def send_email(to: str, subject: str, html: str) -> dict:
 
 
 def generate_qr_data_uri(payload: str) -> str:
-    qr = qrcode.QRCode(box_size=8, border=2, error_correction=qrcode.constants.ERROR_CORRECT_M)
+    qr = qrcode.QRCode(
+        box_size=8, border=2, error_correction=qrcode.constants.ERROR_CORRECT_M
+    )
     qr.add_data(payload)
     qr.make(fit=True)
     img = qr.make_image(fill_color="black", back_color="white")
@@ -184,7 +208,9 @@ def validate_password(pw: str) -> None:
     if not re.search(r"[0-9]", pw):
         raise HTTPException(400, "Password must include at least one digit.")
     if not re.search(r"[^A-Za-z0-9\s]", pw):
-        raise HTTPException(400, "Password must include at least one special character.")
+        raise HTTPException(
+            400, "Password must include at least one special character."
+        )
     if re.search(r"\s", pw):
         raise HTTPException(400, "Password must not contain spaces.")
 
@@ -237,7 +263,7 @@ class ProfileUpdateIn(BaseModel):
 
 class VerificationSubmitIn(BaseModel):
     college_id_image: Optional[str] = ""  # base64 data URI (optional)
-    selfie_image: Optional[str] = ""      # base64 data URI (optional)
+    selfie_image: Optional[str] = ""  # base64 data URI (optional)
     college_name: str
     course: str
     year: str
@@ -302,15 +328,19 @@ async def register(body: RegisterIn, response: Response):
 
     # Reward the referrer + log the referral event
     if referrer:
-        await db.users.update_one({"_id": referrer["_id"]}, {"$inc": {"reward_points": 100}})
-        await db.referrals.insert_one({
-            "referrer_id": referrer["_id"],
-            "referrer_email": referrer["email"],
-            "referred_id": result.inserted_id,
-            "referred_email": email,
-            "points_awarded": 100,
-            "created_at": now,
-        })
+        await db.users.update_one(
+            {"_id": referrer["_id"]}, {"$inc": {"reward_points": 100}}
+        )
+        await db.referrals.insert_one(
+            {
+                "referrer_id": referrer["_id"],
+                "referrer_email": referrer["email"],
+                "referred_id": result.inserted_id,
+                "referred_email": email,
+                "points_awarded": 100,
+                "created_at": now,
+            }
+        )
         # Bonus notification email (best-effort)
         send_email(
             referrer["email"],
@@ -323,14 +353,16 @@ async def register(body: RegisterIn, response: Response):
 
     # Generate and send OTP (6-digit)
     otp = f"{secrets.randbelow(1000000):06d}"
-    await db.otp_codes.insert_one({
-        "user_id": result.inserted_id,
-        "email": email,
-        "otp": otp,
-        "expires_at": now + timedelta(minutes=10),
-        "used": False,
-        "created_at": now,
-    })
+    await db.otp_codes.insert_one(
+        {
+            "user_id": result.inserted_id,
+            "email": email,
+            "otp": otp,
+            "expires_at": now + timedelta(minutes=10),
+            "used": False,
+            "created_at": now,
+        }
+    )
     email_result = send_email(
         email,
         "Your SavyCampusDeals verification code",
@@ -347,7 +379,11 @@ async def register(body: RegisterIn, response: Response):
 
     token = create_access_token(str(result.inserted_id), email, "student")
     set_auth_cookie(response, token)
-    resp = {"user": serialize_user(user_doc), "token": token, "email_sent": email_result["ok"]}
+    resp = {
+        "user": serialize_user(user_doc),
+        "token": token,
+        "email_sent": email_result["ok"],
+    }
     if DEV_OTP_FALLBACK and not email_result["ok"]:
         resp["dev_otp"] = otp
         resp["email_error"] = email_result["error"]
@@ -363,19 +399,23 @@ async def send_otp(body: OtpResendIn):
     if user.get("email_verified"):
         return {"ok": True, "already_verified": True}
     # Throttle: reject if latest OTP < 60 s old
-    latest = await db.otp_codes.find_one({"user_id": user["_id"]}, sort=[("created_at", -1)])
+    latest = await db.otp_codes.find_one(
+        {"user_id": user["_id"]}, sort=[("created_at", -1)]
+    )
     now = datetime.now(timezone.utc)
     if latest and (now - _aware(latest["created_at"])).total_seconds() < 60:
         raise HTTPException(429, "Please wait a minute before requesting a new code")
     otp = f"{secrets.randbelow(1000000):06d}"
-    await db.otp_codes.insert_one({
-        "user_id": user["_id"],
-        "email": email,
-        "otp": otp,
-        "expires_at": now + timedelta(minutes=10),
-        "used": False,
-        "created_at": now,
-    })
+    await db.otp_codes.insert_one(
+        {
+            "user_id": user["_id"],
+            "email": email,
+            "otp": otp,
+            "expires_at": now + timedelta(minutes=10),
+            "used": False,
+            "created_at": now,
+        }
+    )
     email_result = send_email(
         email,
         "Your SavyCampusDeals verification code",
@@ -482,7 +522,8 @@ async def reset(body: ResetIn):
     if not doc or _aware(doc["expires_at"]) < datetime.now(timezone.utc):
         raise HTTPException(400, "Invalid or expired token")
     await db.users.update_one(
-        {"_id": doc["user_id"]}, {"$set": {"password_hash": hash_password(body.password)}}
+        {"_id": doc["user_id"]},
+        {"$set": {"password_hash": hash_password(body.password)}},
     )
     await db.password_resets.update_one({"_id": doc["_id"]}, {"$set": {"used": True}})
     return {"ok": True}
@@ -504,7 +545,9 @@ async def update_profile(body: ProfileUpdateIn, user=Depends(get_current_user)):
 # Verification
 # -----------------------------
 @api.post("/verification/submit")
-async def submit_verification(body: VerificationSubmitIn, user=Depends(get_verified_user)):
+async def submit_verification(
+    body: VerificationSubmitIn, user=Depends(get_verified_user)
+):
     if user.get("verification_status") == "approved":
         raise HTTPException(400, "Already verified")
 
@@ -543,7 +586,13 @@ async def submit_verification(body: VerificationSubmitIn, user=Depends(get_verif
     )
     await db.verifications.update_one(
         {"_id": doc["_id"]},
-        {"$set": {"status": "approved", "reviewed_at": now, "reviewer_note": "Auto-approved (demo)"}},
+        {
+            "$set": {
+                "status": "approved",
+                "reviewed_at": now,
+                "reviewer_note": "Auto-approved (demo)",
+            }
+        },
     )
 
     fresh = await db.users.find_one({"_id": user["_id"]})
@@ -552,11 +601,17 @@ async def submit_verification(body: VerificationSubmitIn, user=Depends(get_verif
 
 @api.get("/verification/status")
 async def verification_status(user=Depends(get_current_user)):
-    latest = await db.verifications.find_one({"user_id": user["_id"]}, sort=[("submitted_at", -1)])
+    latest = await db.verifications.find_one(
+        {"user_id": user["_id"]}, sort=[("submitted_at", -1)]
+    )
     return {
         "status": user.get("verification_status", "unverified"),
         "student_number": user.get("student_number", ""),
-        "expiry": user.get("verification_expiry").isoformat() if user.get("verification_expiry") else None,
+        "expiry": (
+            user.get("verification_expiry").isoformat()
+            if user.get("verification_expiry")
+            else None
+        ),
         "last_submission": latest.get("submitted_at").isoformat() if latest else None,
     }
 
@@ -579,7 +634,11 @@ async def student_card(user=Depends(get_current_user)):
         "student_number": user.get("student_number", ""),
         "email": user.get("email", ""),
         "avatar_url": user.get("avatar_url", ""),
-        "expiry": user.get("verification_expiry").isoformat() if user.get("verification_expiry") else None,
+        "expiry": (
+            user.get("verification_expiry").isoformat()
+            if user.get("verification_expiry")
+            else None
+        ),
         "qr_data_uri": qr,
     }
 
@@ -693,7 +752,9 @@ async def get_offer(offer_id: str, request: Request):
     saved_ids: set = set()
     try:
         user = await get_current_user(request)
-        saved = await db.saved_offers.find_one({"user_id": user["_id"], "offer_id": o["_id"]})
+        saved = await db.saved_offers.find_one(
+            {"user_id": user["_id"], "offer_id": o["_id"]}
+        )
         if saved:
             saved_ids.add(offer_id)
     except Exception:
@@ -709,7 +770,11 @@ async def toggle_save(offer_id: str, user=Depends(get_current_user)):
         await db.saved_offers.delete_one({"_id": existing["_id"]})
         return {"saved": False}
     await db.saved_offers.insert_one(
-        {"user_id": user["_id"], "offer_id": oid, "created_at": datetime.now(timezone.utc)}
+        {
+            "user_id": user["_id"],
+            "offer_id": oid,
+            "created_at": datetime.now(timezone.utc),
+        }
     )
     return {"saved": True}
 
@@ -759,7 +824,9 @@ async def claim_offer(offer_id: str, user=Depends(get_verified_user)):
         raise HTTPException(404, "Offer not found")
 
     # prevent duplicate active coupon for same offer
-    existing = await db.coupons.find_one({"user_id": user["_id"], "offer_id": oid, "status": "active"})
+    existing = await db.coupons.find_one(
+        {"user_id": user["_id"], "offer_id": oid, "status": "active"}
+    )
     if existing:
         return serialize_coupon(existing, offer)
 
@@ -813,7 +880,11 @@ async def claim_offer(offer_id: str, user=Depends(get_verified_user)):
 
 @api.get("/coupons")
 async def my_coupons(user=Depends(get_current_user)):
-    coupons = await db.coupons.find({"user_id": user["_id"]}).sort("created_at", -1).to_list(200)
+    coupons = (
+        await db.coupons.find({"user_id": user["_id"]})
+        .sort("created_at", -1)
+        .to_list(200)
+    )
     result = []
     for c in coupons:
         o = await db.offers.find_one({"_id": c["offer_id"]})
@@ -836,7 +907,9 @@ async def get_coupon(coupon_id: str, user=Depends(get_current_user)):
 @api.get("/dashboard/stats")
 async def dashboard_stats(user=Depends(get_current_user)):
     claimed = await db.coupons.count_documents({"user_id": user["_id"]})
-    active = await db.coupons.count_documents({"user_id": user["_id"], "status": "active"})
+    active = await db.coupons.count_documents(
+        {"user_id": user["_id"], "status": "active"}
+    )
     saved = await db.saved_offers.count_documents({"user_id": user["_id"]})
     total_offers = await db.offers.count_documents({})
     return {
@@ -947,9 +1020,19 @@ def _parse_qr_payload(raw: str) -> dict:
 
     parts = raw.split("|")
     if len(parts) >= 4 and parts[0] == "SCD":
-        return {"kind": "student", "student_number": parts[1], "user_id": parts[2], "email": parts[3]}
+        return {
+            "kind": "student",
+            "student_number": parts[1],
+            "user_id": parts[2],
+            "email": parts[3],
+        }
     if len(parts) >= 4 and parts[0] == "COUPON":
-        return {"kind": "coupon", "code": parts[1], "user_id": parts[2], "offer_id": parts[3]}
+        return {
+            "kind": "coupon",
+            "code": parts[1],
+            "user_id": parts[2],
+            "offer_id": parts[3],
+        }
     if raw.upper().startswith("SCD-") and len(raw) >= 8:
         # Student numbers look like SCD-2026-XXXXXX ; coupon codes like SCD-XXXXXXXX
         segs = raw.split("-")
@@ -1003,11 +1086,18 @@ async def scan_lookup(body: ScanIn):
             "kind": "coupon",
             "code": c["code"],
             "status": c["status"],
-            "expired": bool(c.get("expires_at") and _aware(c["expires_at"]) < datetime.now(timezone.utc)),
+            "expired": bool(
+                c.get("expires_at")
+                and _aware(c["expires_at"]) < datetime.now(timezone.utc)
+            ),
             "offer_title": (offer or {}).get("title", ""),
             "brand": (offer or {}).get("brand", ""),
             "discount": (offer or {}).get("discount", ""),
-            "outlet_id": str(offer.get("outlet_id")) if offer and offer.get("outlet_id") else None,
+            "outlet_id": (
+                str(offer.get("outlet_id"))
+                if offer and offer.get("outlet_id")
+                else None
+            ),
             # Student info surfaced prominently so restaurant staff can trust the claim
             "student_name": (user or {}).get("name", ""),
             "student_number": (user or {}).get("student_number", ""),
@@ -1018,8 +1108,12 @@ async def scan_lookup(body: ScanIn):
             "student_avatar_url": (user or {}).get("avatar_url", ""),
             "student_verified": (user or {}).get("verification_status") == "approved",
             "student_expiry": student_expiry.isoformat() if student_expiry else None,
-            "student_expiry_expired": bool(student_expiry and _aware(student_expiry) < datetime.now(timezone.utc)),
-            "redeemed_at": c["redeemed_at"].isoformat() if c.get("redeemed_at") else None,
+            "student_expiry_expired": bool(
+                student_expiry and _aware(student_expiry) < datetime.now(timezone.utc)
+            ),
+            "redeemed_at": (
+                c["redeemed_at"].isoformat() if c.get("redeemed_at") else None
+            ),
         }
 
     raise HTTPException(400, "Unrecognised QR code")
@@ -1079,7 +1173,10 @@ SEED_OFFERS = [
         "image_url": "https://images.unsplash.com/photo-1614680376573-df3480f0c6ff?w=1200",
         "terms": "New Premium users only. Verified through SheerID once every 12 months (max 4 years).",
         "validity": "Ongoing",
-        "featured": True, "trending": True, "location": "Digital", "claims_count": 5610,
+        "featured": True,
+        "trending": True,
+        "location": "Digital",
+        "claims_count": 5610,
     },
     {
         "title": "YouTube Premium Student — ₹79/month",
@@ -1092,7 +1189,10 @@ SEED_OFFERS = [
         "image_url": "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=1200",
         "terms": "SheerID verification required. Reverify every 12 months.",
         "validity": "Ongoing",
-        "featured": True, "trending": True, "location": "Digital", "claims_count": 4110,
+        "featured": True,
+        "trending": True,
+        "location": "Digital",
+        "claims_count": 4110,
     },
     {
         "title": "Apple Music Student — ₹49/month",
@@ -1105,7 +1205,10 @@ SEED_OFFERS = [
         "image_url": "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=1200",
         "terms": "Available up to 48 months while enrolled. UNiDAYS verification.",
         "validity": "Ongoing",
-        "featured": False, "trending": True, "location": "Digital", "claims_count": 2140,
+        "featured": False,
+        "trending": True,
+        "location": "Digital",
+        "claims_count": 2140,
     },
     {
         "title": "MacBook & iPad — Education Pricing",
@@ -1118,7 +1221,10 @@ SEED_OFFERS = [
         "image_url": "https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=1200",
         "terms": "Apple Education Store verifies with your college email or ID. One device per year.",
         "validity": "Ongoing",
-        "featured": True, "trending": True, "location": "Online", "claims_count": 2780,
+        "featured": True,
+        "trending": True,
+        "location": "Online",
+        "claims_count": 2780,
     },
     {
         "title": "Notion for Students — FREE Plus Plan",
@@ -1131,7 +1237,10 @@ SEED_OFFERS = [
         "image_url": "https://images.unsplash.com/photo-1611175694989-4870fafa4494?w=1200",
         "terms": "Verify with college email through Notion Students page. Reverify annually.",
         "validity": "Ongoing",
-        "featured": True, "trending": False, "location": "Digital", "claims_count": 3220,
+        "featured": True,
+        "trending": False,
+        "location": "Digital",
+        "claims_count": 3220,
     },
     {
         "title": "GitHub Student Developer Pack — FREE",
@@ -1144,7 +1253,10 @@ SEED_OFFERS = [
         "image_url": "https://images.unsplash.com/photo-1618401471353-b98afee0b2eb?w=1200",
         "terms": "Requires a valid student email or ID scan. Renews as long as you're enrolled.",
         "validity": "Ongoing",
-        "featured": True, "trending": True, "location": "Digital", "claims_count": 6410,
+        "featured": True,
+        "trending": True,
+        "location": "Digital",
+        "claims_count": 6410,
     },
     {
         "title": "Creative Cloud All Apps — Flat 65% OFF",
@@ -1157,7 +1269,10 @@ SEED_OFFERS = [
         "image_url": "https://images.unsplash.com/photo-1611162616475-46b635cb6868?w=1200",
         "terms": "First-year rate ₹1,675/mo, then ₹2,720/mo. SheerID verification.",
         "validity": "Ongoing",
-        "featured": True, "trending": True, "location": "Digital", "claims_count": 1980,
+        "featured": True,
+        "trending": True,
+        "location": "Digital",
+        "claims_count": 1980,
     },
     {
         "title": "Figma Education — FREE Professional",
@@ -1170,7 +1285,10 @@ SEED_OFFERS = [
         "image_url": "https://images.unsplash.com/photo-1613909207039-6b173b755cc1?w=1200",
         "terms": "Verify via Figma Education form. Renewable annually.",
         "validity": "Ongoing",
-        "featured": False, "trending": True, "location": "Digital", "claims_count": 1130,
+        "featured": False,
+        "trending": True,
+        "location": "Digital",
+        "claims_count": 1130,
     },
     {
         "title": "Canva for Campus — FREE Pro",
@@ -1183,7 +1301,10 @@ SEED_OFFERS = [
         "image_url": "https://images.unsplash.com/photo-1626785774573-4b799315345d?w=1200",
         "terms": "Available only if your college is a Canva for Campus partner. Free otherwise via edu email.",
         "validity": "Ongoing",
-        "featured": False, "trending": True, "location": "Digital", "claims_count": 2410,
+        "featured": False,
+        "trending": True,
+        "location": "Digital",
+        "claims_count": 2410,
     },
     {
         "title": "Prime Student — ₹49/month or ₹399/year",
@@ -1196,7 +1317,10 @@ SEED_OFFERS = [
         "image_url": "https://images.unsplash.com/photo-1620913166829-19b4c0d5715f?w=1200",
         "terms": "SheerID student verification. Renew annually.",
         "validity": "Ongoing",
-        "featured": False, "trending": True, "location": "Pan India", "claims_count": 3760,
+        "featured": False,
+        "trending": True,
+        "location": "Pan India",
+        "claims_count": 3760,
     },
     {
         "title": "Swiggy One Lite Student — ₹1 for 3 months",
@@ -1209,7 +1333,10 @@ SEED_OFFERS = [
         "image_url": "https://images.unsplash.com/photo-1555939594-58d7cb561ad1?w=1200",
         "terms": "18–25 yrs, students in 200+ cities. Verify college email or ID in Swiggy app → Student Rewards.",
         "validity": "Live now",
-        "featured": True, "trending": True, "location": "Pan India", "claims_count": 8210,
+        "featured": True,
+        "trending": True,
+        "location": "Pan India",
+        "claims_count": 8210,
     },
     {
         "title": "Zomato Gold Flash Sale — ₹1 / 3 Months",
@@ -1222,7 +1349,10 @@ SEED_OFFERS = [
         "image_url": "https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=1200",
         "terms": "Limited-period flash sale in the Zomato app → Gold section.",
         "validity": "Limited-time",
-        "featured": True, "trending": True, "location": "Pan India", "claims_count": 6520,
+        "featured": True,
+        "trending": True,
+        "location": "Pan India",
+        "claims_count": 6520,
     },
     {
         "title": "Coursera Plus — 50% OFF Annual",
@@ -1235,7 +1365,10 @@ SEED_OFFERS = [
         "image_url": "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=1200",
         "terms": "Verify via UNiDAYS. Applies to annual plan only.",
         "validity": "Ongoing",
-        "featured": False, "trending": False, "location": "Digital", "claims_count": 1560,
+        "featured": False,
+        "trending": False,
+        "location": "Digital",
+        "claims_count": 1560,
     },
     {
         "title": "Microsoft 365 Education — FREE",
@@ -1248,12 +1381,15 @@ SEED_OFFERS = [
         "image_url": "https://images.unsplash.com/photo-1573167243872-43c6433b9d40?w=1200",
         "terms": "Valid EDU email required. Renewed while enrolled.",
         "validity": "Ongoing",
-        "featured": False, "trending": False, "location": "Digital", "claims_count": 2830,
+        "featured": False,
+        "trending": False,
+        "location": "Digital",
+        "claims_count": 2830,
     },
 ]
 
 
-SEED_VERSION = "v2-real-deals-2026"
+SEED_VERSION = "v3-json-migrations"
 
 
 async def seed_offers():
@@ -1268,9 +1404,24 @@ async def seed_offers():
         await db.saved_offers.delete_many({"offer_id": {"$in": old_ids}})
         await db.offers.delete_many({"_id": {"$in": old_ids}})
     now = datetime.now(timezone.utc)
-    docs = [{**o, "created_at": now, "outlet_id": None} for o in SEED_OFFERS]
+    # docs = [{**o, "created_at": now, "outlet_id": None} for o in SEED_OFFERS]
+    offers = load_data("brand_offers.json")
+    docs = [
+        {
+            **offer,
+            "claims_count": 0,
+            "created_at": now,
+            "outlet_id": None,
+        }
+        for offer in offers
+    ]
+
     await db.offers.insert_many(docs)
-    await db.seed_meta.update_one({"key": "offers"}, {"$set": {"version": SEED_VERSION, "updated_at": now}}, upsert=True)
+    await db.seed_meta.update_one(
+        {"key": "offers"},
+        {"$set": {"version": SEED_VERSION, "updated_at": now}},
+        upsert=True,
+    )
     logger.info(f"Seeded {len(docs)} REAL brand offers ({SEED_VERSION})")
 
 
@@ -1281,7 +1432,8 @@ SEED_OUTLETS = [
         "cuisine": "Cafe • Bakery",
         "city": "Mumbai",
         "address": "Bandra Linking Road, Mumbai 400050",
-        "lat": 19.0680, "lng": 72.8365,
+        "lat": 19.0680,
+        "lng": 72.8365,
         "image_url": "https://images.pexels.com/photos/34482998/pexels-photo-34482998.jpeg",
         "cover_url": "https://images.pexels.com/photos/34482998/pexels-photo-34482998.jpeg",
         "logo_url": "https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=200",
@@ -1289,8 +1441,22 @@ SEED_OUTLETS = [
         "hours": "8am – 11pm",
         "rating": 4.7,
         "offers": [
-            {"title": "Buy 1 Get 1 on Cold Brews", "discount": "BOGO", "description": "Every cold brew comes with a friend, on us. Verified students only.", "terms": "In-store only. Cannot combine with other offers.", "validity": "Till 31 Dec", "featured": True, "trending": True},
-            {"title": "30% OFF Weekend Brunch", "discount": "30% OFF", "description": "Sat & Sun mornings, hit our brunch spread for 30% less.", "terms": "Valid Sat/Sun 9-1pm only.", "validity": "Weekends"},
+            {
+                "title": "Buy 1 Get 1 on Cold Brews",
+                "discount": "BOGO",
+                "description": "Every cold brew comes with a friend, on us. Verified students only.",
+                "terms": "In-store only. Cannot combine with other offers.",
+                "validity": "Till 31 Dec",
+                "featured": True,
+                "trending": True,
+            },
+            {
+                "title": "30% OFF Weekend Brunch",
+                "discount": "30% OFF",
+                "description": "Sat & Sun mornings, hit our brunch spread for 30% less.",
+                "terms": "Valid Sat/Sun 9-1pm only.",
+                "validity": "Weekends",
+            },
         ],
     },
     {
@@ -1299,7 +1465,8 @@ SEED_OUTLETS = [
         "cuisine": "Asian • Momos",
         "city": "Delhi",
         "address": "Hudson Lane, GTB Nagar, Delhi 110009",
-        "lat": 28.7047, "lng": 77.2109,
+        "lat": 28.7047,
+        "lng": 77.2109,
         "image_url": "https://images.unsplash.com/photo-1626804475297-41608ea09aeb?w=1200",
         "cover_url": "https://images.unsplash.com/photo-1626804475297-41608ea09aeb?w=1600",
         "logo_url": "https://images.unsplash.com/photo-1626804475297-41608ea09aeb?w=200",
@@ -1307,7 +1474,14 @@ SEED_OUTLETS = [
         "hours": "11am – 12am",
         "rating": 4.5,
         "offers": [
-            {"title": "Flat ₹100 OFF on Orders ₹299+", "discount": "₹100 OFF", "description": "Because 10 momos > 8.", "terms": "Min order ₹299. Dine-in only.", "validity": "Till 15 Jan", "trending": True},
+            {
+                "title": "Flat ₹100 OFF on Orders ₹299+",
+                "discount": "₹100 OFF",
+                "description": "Because 10 momos > 8.",
+                "terms": "Min order ₹299. Dine-in only.",
+                "validity": "Till 15 Jan",
+                "trending": True,
+            },
         ],
     },
     {
@@ -1316,7 +1490,8 @@ SEED_OUTLETS = [
         "cuisine": "Cafe • Boba",
         "city": "Bangalore",
         "address": "Church Street, Bangalore 560001",
-        "lat": 12.9754, "lng": 77.6084,
+        "lat": 12.9754,
+        "lng": 77.6084,
         "image_url": "https://images.unsplash.com/photo-1445116572660-236099ec97a0?w=1200",
         "cover_url": "https://images.unsplash.com/photo-1445116572660-236099ec97a0?w=1600",
         "logo_url": "https://images.unsplash.com/photo-1445116572660-236099ec97a0?w=200",
@@ -1324,7 +1499,14 @@ SEED_OUTLETS = [
         "hours": "9am – 11pm",
         "rating": 4.8,
         "offers": [
-            {"title": "Free Boba Upgrade + 20% OFF", "discount": "20% OFF", "description": "Level up any drink to boba, free. Plus 20% off the bill.", "terms": "In-store only.", "validity": "Ongoing", "featured": True},
+            {
+                "title": "Free Boba Upgrade + 20% OFF",
+                "discount": "20% OFF",
+                "description": "Level up any drink to boba, free. Plus 20% off the bill.",
+                "terms": "In-store only.",
+                "validity": "Ongoing",
+                "featured": True,
+            },
         ],
     },
     {
@@ -1333,7 +1515,8 @@ SEED_OUTLETS = [
         "cuisine": "American • Burgers",
         "city": "Mumbai",
         "address": "Powai Central, Mumbai 400076",
-        "lat": 19.1176, "lng": 72.9060,
+        "lat": 19.1176,
+        "lng": 72.9060,
         "image_url": "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=1200",
         "cover_url": "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=1600",
         "logo_url": "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=200",
@@ -1341,7 +1524,14 @@ SEED_OUTLETS = [
         "hours": "12pm – 1am",
         "rating": 4.6,
         "offers": [
-            {"title": "Free Fries + Coke on Any Burger", "discount": "FREE COMBO", "description": "Any burger, we throw in fries + a drink. On the house.", "terms": "One combo per student per visit.", "validity": "Weekdays only", "trending": True},
+            {
+                "title": "Free Fries + Coke on Any Burger",
+                "discount": "FREE COMBO",
+                "description": "Any burger, we throw in fries + a drink. On the house.",
+                "terms": "One combo per student per visit.",
+                "validity": "Weekdays only",
+                "trending": True,
+            },
         ],
     },
     {
@@ -1350,7 +1540,8 @@ SEED_OUTLETS = [
         "cuisine": "South Indian",
         "city": "Bangalore",
         "address": "Jayanagar 4th Block, Bangalore 560011",
-        "lat": 12.9299, "lng": 77.5834,
+        "lat": 12.9299,
+        "lng": 77.5834,
         "image_url": "https://images.unsplash.com/photo-1567337710282-00832b415979?w=1200",
         "cover_url": "https://images.unsplash.com/photo-1567337710282-00832b415979?w=1600",
         "logo_url": "https://images.unsplash.com/photo-1567337710282-00832b415979?w=200",
@@ -1358,7 +1549,14 @@ SEED_OUTLETS = [
         "hours": "6am – 10pm",
         "rating": 4.9,
         "offers": [
-            {"title": "Unlimited Thali at ₹149", "discount": "₹149 THALI", "description": "Unlimited South Indian thali for verified students.", "terms": "Dine-in only. Lunch (12-3pm).", "validity": "Till 28 Feb", "featured": True},
+            {
+                "title": "Unlimited Thali at ₹149",
+                "discount": "₹149 THALI",
+                "description": "Unlimited South Indian thali for verified students.",
+                "terms": "Dine-in only. Lunch (12-3pm).",
+                "validity": "Till 28 Feb",
+                "featured": True,
+            },
         ],
     },
     {
@@ -1367,7 +1565,8 @@ SEED_OUTLETS = [
         "cuisine": "Cafe • Snacks",
         "city": "Delhi",
         "address": "Kamla Nagar, Delhi 110007",
-        "lat": 28.6864, "lng": 77.2072,
+        "lat": 28.6864,
+        "lng": 77.2072,
         "image_url": "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=1200",
         "cover_url": "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=1600",
         "logo_url": "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=200",
@@ -1375,7 +1574,13 @@ SEED_OUTLETS = [
         "hours": "7am – 11pm",
         "rating": 4.4,
         "offers": [
-            {"title": "₹99 Maggi + Chai Combo", "discount": "₹99 COMBO", "description": "The DU tradition: maggi + chai for ninety-nine.", "terms": "Dine-in only.", "validity": "Ongoing"},
+            {
+                "title": "₹99 Maggi + Chai Combo",
+                "discount": "₹99 COMBO",
+                "description": "The DU tradition: maggi + chai for ninety-nine.",
+                "terms": "Dine-in only.",
+                "validity": "Ongoing",
+            },
         ],
     },
 ]
@@ -1393,23 +1598,25 @@ async def seed_outlets():
         # attach offers to outlet
         offer_docs = []
         for o in offers:
-            offer_docs.append({
-                "title": o["title"],
-                "brand": od["name"],
-                "brand_logo": od.get("logo_url", ""),
-                "category": "Food & Drink",
-                "description": o["description"],
-                "discount": o["discount"],
-                "image_url": od.get("cover_url", od.get("image_url", "")),
-                "terms": o.get("terms", ""),
-                "validity": o.get("validity", "Ongoing"),
-                "featured": o.get("featured", False),
-                "trending": o.get("trending", False),
-                "location": f"{od['name']} • {od['city']}",
-                "claims_count": 0,
-                "outlet_id": outlet_id,
-                "created_at": now,
-            })
+            offer_docs.append(
+                {
+                    "title": o["title"],
+                    "brand": od["name"],
+                    "brand_logo": od.get("logo_url", ""),
+                    "category": "Food & Drink",
+                    "description": o["description"],
+                    "discount": o["discount"],
+                    "image_url": od.get("cover_url", od.get("image_url", "")),
+                    "terms": o.get("terms", ""),
+                    "validity": o.get("validity", "Ongoing"),
+                    "featured": o.get("featured", False),
+                    "trending": o.get("trending", False),
+                    "location": f"{od['name']} • {od['city']}",
+                    "claims_count": 0,
+                    "outlet_id": outlet_id,
+                    "created_at": now,
+                }
+            )
         if offer_docs:
             await db.offers.insert_many(offer_docs)
     logger.info(f"Seeded {len(SEED_OUTLETS)} outlets with their offers")
@@ -1441,7 +1648,9 @@ async def seed_admin():
 async def on_startup():
     try:
         await db.users.create_index("email", unique=True)
-        await db.saved_offers.create_index([("user_id", 1), ("offer_id", 1)], unique=True)
+        await db.saved_offers.create_index(
+            [("user_id", 1), ("offer_id", 1)], unique=True
+        )
         await db.coupons.create_index([("user_id", 1), ("offer_id", 1), ("status", 1)])
         await db.password_resets.create_index("expires_at", expireAfterSeconds=0)
     except Exception as e:

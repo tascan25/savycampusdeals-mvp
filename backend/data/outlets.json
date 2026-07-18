@@ -1,0 +1,86 @@
+[
+  {
+    "name": "McDonald's",
+    "tagline": "I'm Lovin' It",
+    "cuisine": "Fast Food",
+    "city": "Noida",
+    "address": "Sector 18, Noida",
+    "lat": 28.57,
+    "lng": 77.32,
+
+    "image_url": "https://images.unsplash.com/photo-1552566626-52f8b828add9?auto=format&fit=crop&w=1200&q=80",
+
+    "cover_url": "https://images.unsplash.com/photo-1552566626-52f8b828add9?auto=format&fit=crop&w=1600&q=80",
+
+    "logo_url": "https://upload.wikimedia.org/wikipedia/commons/4/4e/McDonald%27s_Golden_Arches.svg",
+
+    "phone": "+91 9876543210",
+    "hours": "10am – 11pm",
+    "rating": 4.5,
+
+    "offers": [
+      {
+        "title": "20% OFF McSaver Meals",
+        "category": "Food",
+        "discount": "20% OFF",
+        "description": "Available for verified students.",
+        "terms": "Valid once per day.",
+        "validity": "Till 31 Dec",
+        "featured": true,
+        "trending": true
+      },
+      {
+        "title": "Free Medium Fries",
+        "category": "Food",
+        "discount": "FREE",
+        "description": "On orders above ₹299.",
+        "terms": "Dine-in only.",
+        "validity": "Till 31 Dec",
+        "featured": false,
+        "trending": false
+      }
+    ]
+  },
+  {
+    "name": "Barbeque Nation",
+    "tagline": "The Ultimate Grill Experience",
+    "cuisine": "Buffet & BBQ",
+    "city": "Delhi",
+    "address": "N-79, Outer Circle, Connaught Place, New Delhi",
+    "lat": 28.6315,
+    "lng": 77.2167,
+
+    "image_url": "https://images.unsplash.com/photo-1552566626-52f8b828add9?auto=format&fit=crop&w=1200&q=80",
+
+    "cover_url": "https://images.unsplash.com/photo-1552566626-52f8b828add9?auto=format&fit=crop&w=1600&q=80",
+
+    "logo_url": "https://upload.wikimedia.org/wikipedia/en/8/83/Barbeque_Nation_Logo.png",
+
+    "phone": "+91 9876543211",
+    "hours": "12pm – 10:30pm",
+    "rating": 4.4,
+
+    "offers": [
+      {
+        "title": "Student Lunch Buffet",
+        "category": "Food",
+        "discount": "₹599",
+        "description": "Enjoy the weekday lunch buffet at a special student price with a valid college ID.",
+        "terms": "Valid Monday to Thursday. Student ID required. Taxes extra.",
+        "validity": "Ongoing",
+        "featured": true,
+        "trending": true
+      },
+      {
+        "title": "Free Soft Drink",
+        "category": "Food",
+        "discount": "FREE",
+        "description": "Get one complimentary soft drink with any buffet purchase.",
+        "terms": "Valid with student buffet offer only.",
+        "validity": "Ongoing",
+        "featured": false,
+        "trending": false
+      }
+    ]
+  }
+]
