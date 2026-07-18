@@ -163,20 +163,21 @@ def _aware(dt):
 DEV_OTP_FALLBACK = os.environ.get("DEV_OTP_FALLBACK", "true").lower() == "true"
 
 
-def send_email(to: str, subject: str, html: str) -> dict:
+def send_email(to: str, subject: str, html: str, attachments=None) -> dict:
     """Returns {ok: bool, error: str|None}."""
     if not RESEND_API_KEY:
         logger.warning(f"[Email skipped: no key] To={to}")
         return {"ok": False, "error": "no_api_key"}
     try:
-        resend.Emails.send(
-            {
-                "from": f"SavyCampusDeals <{FROM_EMAIL}>",
-                "to": [to],
-                "subject": subject,
-                "html": html,
-            }
-        )
+        params = {
+            "from": f"SavyCampusDeals <{FROM_EMAIL}>",
+            "to": [to],
+            "subject": subject,
+            "html": html,
+        }
+        if attachments:
+            params["attachments"] = attachments
+        resend.Emails.send(params)
         return {"ok": True, "error": None}
     except Exception as e:
         logger.error(f"Resend error: {e}")
@@ -967,7 +968,113 @@ async def claim_offer(offer_id: str, user=Depends(get_verified_user)):
     send_email(
         user["email"],
         f"Your {offer['brand']} coupon is ready",
-        f"<p>Your code: <b>{code}</b> for {offer['title']}. Show it at checkout.</p>",
+        f"""<!doctype html>
+<html lang="en">
+  <body style="margin:0;padding:0;background-color:#0a0a0f;color:#f8fafc;font-family:Arial,Helvetica,sans-serif;-webkit-text-size-adjust:100%;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">Your student deal is ready to use.</div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;margin:0;padding:0;background-color:#0a0a0f;">
+      <tr>
+        <td align="center" style="padding:28px 16px 40px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;margin:0 auto;">
+            <tr>
+              <td style="padding:0 8px 28px;">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                  <tr>
+                    <td style="width:34px;height:34px;border-radius:10px;background-color:#7c3aed;text-align:center;font-size:18px;line-height:34px;">S</td>
+                    <td style="padding-left:10px;vertical-align:middle;">
+                      <div style="font-size:16px;line-height:20px;font-weight:700;letter-spacing:-0.3px;color:#ffffff;">SavyCampusDeals</div>
+                      <div style="font-size:11px;line-height:16px;color:#a1a1aa;">Exclusive student deals</div>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:32px 28px 30px;border:1px solid #312e4b;border-radius:24px 24px 0 0;background-color:#171425;background-image:linear-gradient(135deg,#171425 0%,#1d1740 58%,#102d38 100%);">
+                <div style="display:inline-block;padding:6px 10px;border:1px solid #514b75;border-radius:999px;background-color:#292343;color:#c4b5fd;font-size:11px;line-height:14px;font-weight:700;letter-spacing:0.7px;text-transform:uppercase;">Student deal unlocked</div>
+                <h1 style="margin:18px 0 10px;font-size:32px;line-height:38px;font-weight:800;letter-spacing:-1px;color:#ffffff;">&#127881; Your Coupon is Ready!</h1>
+                <p style="margin:0;font-size:16px;line-height:24px;color:#d4d4dc;">Nice! Your student discount has been unlocked. Less spending. More living. &#128156;</p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:0 28px 30px;border-left:1px solid #312e4b;border-right:1px solid #312e4b;background-color:#171425;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border:1px solid #4b4670;border-radius:20px;background-color:#11111a;">
+                  <tr>
+                    <td style="padding:24px 22px 12px;">
+                      <div style="font-size:12px;line-height:16px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;color:#a78bfa;">{offer['brand']}</div>
+                      <div style="padding-top:7px;font-size:20px;line-height:27px;font-weight:700;letter-spacing:-0.35px;color:#ffffff;">{offer['title']}</div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding:10px 22px 20px;">
+                      <div style="padding:17px 14px;border:1px dashed #7669ae;border-radius:14px;background-color:#1d1930;text-align:center;">
+                        <div style="font-size:11px;line-height:15px;font-weight:700;letter-spacing:0.9px;text-transform:uppercase;color:#b8b2d7;">Your coupon code</div>
+                        <div style="padding-top:8px;font-family:'Courier New',Courier,monospace;font-size:25px;line-height:30px;font-weight:700;letter-spacing:1.5px;color:#ffffff;word-break:break-all;">{code}</div>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding:0 22px 24px;">
+                      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;">
+                        <tr>
+                          <td style="font-size:13px;line-height:19px;color:#a1a1aa;">Valid until</td>
+                          <td align="right" style="font-size:13px;line-height:19px;font-weight:700;color:#e9e7ff;">{expires.strftime('%B %d, %Y')}</td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:0 28px 26px;border-left:1px solid #312e4b;border-right:1px solid #312e4b;background-color:#171425;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-radius:18px;background-color:#0e2028;">
+                  <tr>
+                    <td style="padding:20px 18px;">
+                      <div style="font-size:17px;line-height:23px;font-weight:700;color:#ffffff;">How to redeem</div>
+                      <div style="padding-top:10px;font-size:14px;line-height:22px;color:#d1e4e9;">Use your coupon code at checkout, or show this email to the outlet team when you redeem in person. If asked, let them scan the QR code below.</div>
+                    </td>
+                    <td align="center" valign="middle" style="width:112px;padding:18px 18px 18px 0;">
+                      <div style="padding:8px;border-radius:13px;background-color:#ffffff;line-height:0;">
+                        <img src="cid:coupon-qr" width="88" height="88" alt="Coupon QR code" style="display:block;width:88px;height:88px;border:0;outline:none;text-decoration:none;" />
+                      </div>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:0 28px 30px;border-left:1px solid #312e4b;border-right:1px solid #312e4b;background-color:#171425;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border:1px solid #514b75;border-radius:16px;background-color:#211d35;">
+                  <tr>
+                    <td style="padding:17px 18px;">
+                      <div style="font-size:13px;line-height:19px;font-weight:700;color:#f5f3ff;">A quick note before you go</div>
+                      <div style="padding-top:5px;font-size:12px;line-height:19px;color:#c9c4df;">This coupon can only be redeemed once. Keep this email until it has been used, and only show the QR code to outlet staff during redemption.</div>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:25px 28px 28px;border:1px solid #312e4b;border-top:0;border-radius:0 0 24px 24px;background-color:#12111d;text-align:center;">
+                <div style="font-size:14px;line-height:20px;font-weight:700;color:#ffffff;">SavyCampusDeals</div>
+                <div style="padding-top:5px;font-size:12px;line-height:18px;color:#a1a1aa;">Helping students save more every day.</div>
+                <div style="padding-top:13px;font-size:12px;line-height:18px;color:#777286;">Made with &#10084;&#65039; for students &middot; &copy; 2026 SavyCampusDeals</div>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>""",
+        attachments=[
+            {
+                "content": qr.split(",", 1)[1],
+                "filename": "coupon-qr.png",
+                "content_id": "coupon-qr",
+            }
+        ],
     )
     return serialize_coupon(doc, offer)
 
