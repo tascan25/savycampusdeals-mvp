@@ -510,7 +510,101 @@ async def forgot(body: ForgotIn):
         send_email(
             email,
             "Reset your SavyCampusDeals password",
-            f'<p>Reset link (1 hour): <a href="{link}">{link}</a></p>',
+            f"""
+            <!doctype html>
+            <html>
+              <head>
+                <meta charset="utf-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <meta name="color-scheme" content="dark">
+                <meta name="supported-color-schemes" content="dark">
+                <title>Reset Your Password</title>
+              </head>
+              <body style="margin:0; padding:0; width:100%; background-color:#05060a; color:#f7f8fb; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing:antialiased;">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%; margin:0; padding:0; background-color:#05060a;">
+                  <tr>
+                    <td align="center" style="padding:32px 16px;">
+                      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%; max-width:640px; border-collapse:separate;">
+                        <tr>
+                          <td style="padding:0 0 18px 0;">
+                            <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+                              <tr>
+                                <td align="left" style="vertical-align:middle;">
+                                  <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                                    <tr>
+                                      <td align="center" style="width:42px; height:42px; border-radius:14px; background:#ffffff; color:#05060a; font-size:19px; line-height:42px; font-weight:800; text-align:center;">S</td>
+                                      <td style="padding-left:12px; color:#ffffff; font-size:17px; line-height:24px; font-weight:700; letter-spacing:0;">SavyCampusDeals</td>
+                                    </tr>
+                                  </table>
+                                </td>
+                              </tr>
+                            </table>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style="background-color:#0d0f17; border:1px solid #242837; border-radius:24px; overflow:hidden; box-shadow:0 24px 70px rgba(0,0,0,0.42);">
+                            <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+                              <tr>
+                                <td style="padding:1px; background:linear-gradient(135deg, rgba(255,255,255,0.36), rgba(118,140,255,0.24), rgba(31,35,48,0));">
+                                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#0d0f17; border-radius:23px;">
+                                    <tr>
+                                      <td style="padding:44px 40px 18px 40px;">
+                                        <div style="display:inline-block; padding:7px 11px; border:1px solid #2b3144; border-radius:999px; background-color:#151925; color:#aab3c7; font-size:12px; line-height:16px; font-weight:600; letter-spacing:0.04em; text-transform:uppercase;">Secure account action</div>
+                                        <h1 style="margin:20px 0 0 0; color:#ffffff; font-size:34px; line-height:40px; font-weight:750; letter-spacing:0;">Reset Your Password</h1>
+                                        <p style="margin:16px 0 0 0; color:#c8cedb; font-size:16px; line-height:26px; font-weight:400;">We received a request to reset the password for your SavyCampusDeals account. Use the button below to choose a new password and get back to discovering student deals.</p>
+                                      </td>
+                                    </tr>
+                                    <tr>
+                                      <td align="left" style="padding:18px 40px 28px 40px;">
+                                        <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                                          <tr>
+                                            <td align="center" style="border-radius:14px; background:#ffffff; box-shadow:0 14px 30px rgba(255,255,255,0.12);">
+                                              <a href="{link}" style="display:inline-block; padding:15px 24px; color:#07080c; font-size:15px; line-height:20px; font-weight:750; text-decoration:none; border-radius:14px;">Reset Password</a>
+                                            </td>
+                                          </tr>
+                                        </table>
+                                      </td>
+                                    </tr>
+                                    <tr>
+                                      <td style="padding:0 40px 30px 40px;">
+                                        <p style="margin:0 0 10px 0; color:#8d96aa; font-size:13px; line-height:20px;">If the button does not work, copy and paste this link into your browser:</p>
+                                        <p style="margin:0; padding:14px 16px; background-color:#080a10; border:1px solid #22283a; border-radius:14px; color:#aeb7c9; font-size:13px; line-height:20px; word-break:break-all;">
+                                          <a href="{link}" style="color:#d9e1ff; text-decoration:underline; word-break:break-all;">{link}</a>
+                                        </p>
+                                      </td>
+                                    </tr>
+                                    <tr>
+                                      <td style="padding:0 40px 40px 40px;">
+                                        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#121722; border:1px solid #293247; border-radius:18px;">
+                                          <tr>
+                                            <td style="padding:18px 18px 18px 18px;">
+                                              <p style="margin:0 0 8px 0; color:#ffffff; font-size:14px; line-height:20px; font-weight:700;">A quick security note</p>
+                                              <p style="margin:0; color:#aeb7c9; font-size:14px; line-height:22px;">This link expires in 1 hour. If you did not request this password reset, you can safely ignore this email.</p>
+                                            </td>
+                                          </tr>
+                                        </table>
+                                      </td>
+                                    </tr>
+                                  </table>
+                                </td>
+                              </tr>
+                            </table>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td align="center" style="padding:24px 12px 0 12px;">
+                            <p style="margin:0; color:#8f98aa; font-size:13px; line-height:20px; font-weight:700;">SavyCampusDeals</p>
+                            <p style="margin:6px 0 0 0; color:#6f788a; font-size:12px; line-height:19px;">Support: <a href="mailto:{FROM_EMAIL}" style="color:#aeb7c9; text-decoration:none;">{FROM_EMAIL}</a></p>
+                            <p style="margin:6px 0 0 0; color:#596173; font-size:12px; line-height:19px;">&copy; {datetime.now().year} SavyCampusDeals. All rights reserved.</p>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+              </body>
+            </html>
+            """,
         )
     return {"ok": True}
 
