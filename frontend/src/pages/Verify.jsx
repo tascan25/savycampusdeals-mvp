@@ -1,7 +1,7 @@
 import React, { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Upload, Loader2, BadgeCheck, ShieldCheck, ArrowRight } from "lucide-react";
+import { Upload, Loader2, BadgeCheck, ShieldCheck, ArrowRight, Clock3 } from "lucide-react";
 import { toast } from "sonner";
 import Navbar from "@/components/Navbar";
 import api, { formatApiError } from "@/lib/api";
@@ -39,7 +39,6 @@ function ImageUpload({ label, value, onChange, testId }) {
 
 export default function Verify() {
   const { user, refreshUser } = useAuth();
-  const nav = useNavigate();
   const [f, setF] = useState({
     college_id_image: "", selfie_image: "",
     college_name: user?.college || "", course: user?.course || "", year: user?.year || "",
@@ -47,8 +46,30 @@ export default function Verify() {
   });
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  const isCollegeEmail = user?.verification_method === "college_email";
 
   const update = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+  if (submitted || user?.verification_status === "pending") {
+    return (
+      <div className="min-h-screen bg-[#050505] grain">
+        <Navbar/>
+        <div className="max-w-2xl mx-auto px-6 pt-32 text-center">
+          <div className="inline-flex h-16 w-16 rounded-2xl bg-indigo-500/15 border border-indigo-400/30 items-center justify-center">
+            <Clock3 className="text-indigo-300" size={32}/>
+          </div>
+          <h1 className="font-display text-4xl font-extrabold mt-4">Verification Submitted</h1>
+          <p className="text-zinc-300 mt-4">Your documents have been received successfully.</p>
+          <p className="text-zinc-400 mt-2">Our team is reviewing your verification. Verification is usually completed within 24 hours.</p>
+          <p className="text-zinc-500 mt-2">You'll receive an email once the review is complete.</p>
+          <Link to="/dashboard" className="mt-7 inline-flex items-center gap-2 rounded-full bg-white text-black font-semibold px-6 py-3">
+            Go to dashboard <ArrowRight size={14}/>
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   if (user?.verification_status === "approved") {
     return (
@@ -71,14 +92,20 @@ export default function Verify() {
   const onSubmit = async (e) => {
     e.preventDefault();
     setErr("");
+    if (!isCollegeEmail && (!f.college_id_image || !f.selfie_image)) {
+      setErr("Upload both your college ID card and a selfie holding it to continue.");
+      return;
+    }
     setLoading(true);
     try {
       await api.post("/verification/submit", f);
+      setSubmitted(true);
       await refreshUser();
-      toast.success("Verified! Your pass is ready 🎉");
-      nav("/card");
+      toast.success(isCollegeEmail ? "Verification complete." : "Verification submitted for review.");
     } catch (e) {
-      setErr(formatApiError(e.response?.data?.detail));
+      const message = formatApiError(e.response?.data?.detail);
+      setErr(message);
+      toast.error(message);
     } finally { setLoading(false); }
   };
 
@@ -92,19 +119,25 @@ export default function Verify() {
             <ShieldCheck size={12}/> Student verification
           </div>
           <h1 className="font-display text-4xl md:text-5xl font-extrabold tracking-tighter">Prove you're a student</h1>
-          <p className="text-zinc-400 mt-3 max-w-xl">Fill in your college details below. Uploading your ID + selfie is <span className="text-emerald-300 font-semibold">optional</span> for now — we keep everything encrypted and only use it if manual review is needed.</p>
+          <p className="text-zinc-400 mt-3 max-w-xl">
+            {isCollegeEmail
+              ? "Your approved college email lets us verify your student status from your academic details."
+              : "Upload your college ID and a selfie holding it so our team can review your student status."}
+          </p>
         </motion.div>
 
         <form onSubmit={onSubmit} className="mt-10 glass-heavy rounded-3xl p-8 grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="md:col-span-2 rounded-2xl bg-emerald-500/10 border border-emerald-400/30 p-4 text-sm text-emerald-100">
-            <span className="font-semibold">Optional:</span> Upload photos below only if you want faster manual verification. Otherwise, submit with just your details.
+          <div className={`md:col-span-2 rounded-2xl p-4 text-sm ${isCollegeEmail ? "bg-emerald-500/10 border border-emerald-400/30 text-emerald-100" : "bg-amber-500/10 border border-amber-400/30 text-amber-100"}`}>
+            {isCollegeEmail ? <><span className="font-semibold">College email verification:</span> no document uploads are needed.</> : <><span className="font-semibold">Documents required:</span> both uploads are required for manual review.</>}
           </div>
-          <ImageUpload label="College ID (optional)" value={f.college_id_image} onChange={(v) => update("college_id_image", v)} testId="verify-collegeid-input"/>
-          <ImageUpload label="Selfie (optional)" value={f.selfie_image} onChange={(v) => update("selfie_image", v)} testId="verify-selfie-input"/>
+          {!isCollegeEmail && <>
+            <ImageUpload label="College ID card image *" value={f.college_id_image} onChange={(v) => update("college_id_image", v)} testId="verify-collegeid-input"/>
+            <ImageUpload label="Selfie holding college ID card *" value={f.selfie_image} onChange={(v) => update("selfie_image", v)} testId="verify-selfie-input"/>
+          </>}
 
           {[
             { k: "college_name", label: "College name", required: true },
-            { k: "student_id_number", label: "Student ID number (optional)", required: false },
+            { k: "student_id_number", label: "Student ID / Roll Number", required: true },
             { k: "course", label: "Course (e.g. B.Tech CSE)", required: true },
             { k: "year", label: "Year (e.g. 3rd)", required: true },
           ].map((field) => (

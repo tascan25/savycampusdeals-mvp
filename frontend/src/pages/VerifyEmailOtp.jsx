@@ -28,7 +28,7 @@ export default function VerifyEmailOtp() {
   }, [email, nav]);
 
   useEffect(() => {
-    if (user?.email_verified) nav("/dashboard", { replace: true });
+    if (user?.email_verified) nav("/verify", { replace: true });
   }, [user, nav]);
 
   useEffect(() => {
@@ -72,7 +72,7 @@ export default function VerifyEmailOtp() {
       await api.post("/auth/verify-otp", { email, otp: code });
       await refreshUser();
       toast.success("Email verified! Welcome in.");
-      nav("/dashboard", { replace: true });
+      nav("/verify", { replace: true });
     } catch (e) {
       setErr(formatApiError(e.response?.data?.detail));
       toast.error("Wrong code. Try again.");

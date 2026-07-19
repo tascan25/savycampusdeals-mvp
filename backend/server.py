@@ -10,6 +10,9 @@ import io
 import base64
 import secrets
 import logging
+import asyncio
+import html
+import re
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Any
 
@@ -33,6 +36,7 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, EmailStr, Field
+from pymongo.errors import DuplicateKeyError
 from utils.json_loader import load_data
 
 # -----------------------------
@@ -48,6 +52,15 @@ JWT_ALGO = "HS256"
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 FROM_EMAIL = os.environ.get("FROM_EMAIL", "onboarding@resend.dev")
+# Keep this list deliberately explicit: a domain is trusted only when it appears
+# here.  A non-consumer domain alone is never enough to bypass document review.
+APPROVED_COLLEGE_DOMAINS = {
+    domain.strip().lower()
+    for domain in os.environ.get(
+        "APPROVED_COLLEGE_DOMAINS", "iitd.ac.in,iitb.ac.in,vit.ac.in,amity.edu"
+    ).split(",")
+    if domain.strip()
+}
 
 resend.api_key = RESEND_API_KEY
 
@@ -91,6 +104,11 @@ def create_access_token(uid: str, email: str, role: str) -> str:
 
 
 def serialize_user(u: dict) -> dict:
+    verification_status = u.get("verification_status", "not_submitted")
+    # Legacy accounts used "unverified" before verification states were added.
+    # Preserve their records while exposing the new public state to clients.
+    if verification_status == "unverified":
+        verification_status = "not_submitted"
     return {
         "id": str(u["_id"]),
         "email": u["email"],
@@ -102,7 +120,10 @@ def serialize_user(u: dict) -> dict:
         "phone": u.get("phone", ""),
         "avatar_url": u.get("avatar_url", ""),
         "email_verified": u.get("email_verified", False),
-        "verification_status": u.get("verification_status", "unverified"),
+        "verification_status": verification_status,
+        "verification_method": "college_email"
+        if is_approved_college_email(u["email"])
+        else "document_review",
         "student_number": u.get("student_number", ""),
         "verification_expiry": u.get("verification_expiry"),
         "reward_points": u.get("reward_points", 0),
@@ -184,6 +205,37 @@ def send_email(to: str, subject: str, html: str, attachments=None) -> dict:
         return {"ok": False, "error": str(e)}
 
 
+def is_approved_college_email(email: str) -> bool:
+    """Whether this email's exact domain is allowed to use the academic-only flow."""
+    return email.rsplit("@", 1)[-1].lower() in APPROVED_COLLEGE_DOMAINS
+
+
+def is_image_data_uri(value: Optional[str]) -> bool:
+    """Accept the image data-URI format produced by the existing upload control."""
+    return bool(
+        value
+        and value.startswith("data:image/")
+        and ";base64," in value
+        and len(value) <= 7 * 1024 * 1024
+    )
+
+
+def normalize_student_id(value: str) -> str:
+    """Create a case- and whitespace-insensitive key for student IDs/roll numbers."""
+    return re.sub(r"\s+", "", value).upper()
+
+
+def verification_email_html(
+    heading: str, body: str, cta_label: str = "Open SavyCampusDeals", cta_path: str = "/dashboard"
+) -> str:
+    href = f"{FRONTEND_URL.rstrip('/')}{cta_path}"
+    return f"""<div style="font-family:Manrope,Arial,sans-serif;background:#050505;color:#fff;padding:32px;border-radius:16px;max-width:520px;margin:auto">
+    <h1 style="font-family:Outfit,Arial,sans-serif;font-weight:800">{heading}</h1>
+    <p style="color:#d4d4dc;line-height:1.6">{body}</p>
+    <a href="{href}" style="display:inline-block;margin-top:20px;background:#ffffff;color:#111111;border-radius:999px;padding:12px 20px;font-weight:700;text-decoration:none">{cta_label}</a>
+    </div>"""
+
+
 def generate_qr_data_uri(payload: str) -> str:
     qr = qrcode.QRCode(
         box_size=8, border=2, error_correction=qrcode.constants.ERROR_CORRECT_M
@@ -195,8 +247,6 @@ def generate_qr_data_uri(payload: str) -> str:
     img.save(buf, format="PNG")
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
 
-
-import re
 
 PASSWORD_RE = re.compile(r"^(?=.*[A-Z])(?=.*[^A-Za-z0-9]).{8,}$")
 
@@ -265,10 +315,20 @@ class ProfileUpdateIn(BaseModel):
 class VerificationSubmitIn(BaseModel):
     college_id_image: Optional[str] = ""  # base64 data URI (optional)
     selfie_image: Optional[str] = ""  # base64 data URI (optional)
-    college_name: str
-    course: str
-    year: str
-    student_id_number: Optional[str] = ""
+    college_name: str = Field(min_length=1)
+    course: str = Field(min_length=1)
+    year: str = Field(min_length=1)
+    student_id_number: str = Field(min_length=1)
+
+
+class VerificationReviewIn(BaseModel):
+    status: str
+    reviewer_note: Optional[str] = ""
+
+
+class AdminVerificationDecisionIn(BaseModel):
+    verification_id: str = Field(min_length=24, max_length=24)
+    rejection_reason: Optional[str] = Field(default="", max_length=1000)
 
 
 class OtpVerifyIn(BaseModel):
@@ -315,7 +375,7 @@ async def register(body: RegisterIn, response: Response):
         "avatar_url": "",
         "email_verified": False,
         "email_verify_token": verify_token,
-        "verification_status": "unverified",
+        "verification_status": "not_submitted",
         "student_number": "",
         "verification_expiry": None,
         "reward_points": welcome_points + referral_bonus,
@@ -645,6 +705,38 @@ async def submit_verification(
 ):
     if user.get("verification_status") == "approved":
         raise HTTPException(400, "Already verified")
+    if not body.student_id_number.strip():
+        raise HTTPException(400, "Student ID / Roll Number is required")
+
+    student_id_number = body.student_id_number.strip()
+    student_id_normalized = normalize_student_id(student_id_number)
+    # Match legacy submissions too, which predate the normalized key. The
+    # database index below then makes this race-safe for every new submission.
+    legacy_pattern = "^" + r"\s*".join(re.escape(char) for char in student_id_normalized) + "$"
+    existing_id = await db.verifications.find_one(
+        {
+            "$or": [
+                {"student_id_normalized": student_id_normalized},
+                {"student_id_number": {"$regex": legacy_pattern, "$options": "i"}},
+            ]
+        },
+        {"_id": 1},
+    )
+    if existing_id:
+        raise HTTPException(
+            409,
+            "This Student ID / Roll Number has already been used for verification.",
+        )
+
+    trusted_email = is_approved_college_email(user["email"])
+    if not trusted_email and (
+        not is_image_data_uri(body.college_id_image)
+        or not is_image_data_uri(body.selfie_image)
+    ):
+        raise HTTPException(
+            400,
+            "Upload valid college ID card and selfie images for manual review.",
+        )
 
     now = datetime.now(timezone.utc)
     doc = {
@@ -654,44 +746,401 @@ async def submit_verification(
         "college_name": body.college_name,
         "course": body.course,
         "year": body.year,
-        "student_id_number": body.student_id_number,
-        "status": "pending",
+        "student_id_number": student_id_number,
+        "student_id_normalized": student_id_normalized,
+        "method": "college_email" if trusted_email else "document_review",
+        "status": "approved" if trusted_email else "pending",
         "submitted_at": now,
-        "reviewed_at": None,
-        "reviewer_note": "",
+        "reviewed_at": now if trusted_email else None,
+        "reviewer_note": "Auto-approved via approved college email domain" if trusted_email else "",
     }
-    await db.verifications.insert_one(doc)
+    try:
+        await db.verifications.insert_one(doc)
+    except DuplicateKeyError:
+        raise HTTPException(
+            409,
+            "This Student ID / Roll Number has already been used for verification.",
+        )
 
-    # Auto-approve for MVP demo (in real app: admin manual review)
-    student_number = gen_student_number()
-    expiry = now + timedelta(days=365)
-    await db.users.update_one(
-        {"_id": user["_id"]},
-        {
-            "$set": {
-                "verification_status": "approved",
-                "student_number": student_number,
-                "verification_expiry": expiry,
-                "college": body.college_name,
-                "course": body.course,
-                "year": body.year,
-            },
-            "$inc": {"reward_points": 200},
-        },
-    )
+    user_updates = {
+        "verification_status": "approved" if trusted_email else "pending",
+        "verification_submitted_at": now,
+        "college": body.college_name,
+        "course": body.course,
+        "year": body.year,
+    }
+    update: dict = {"$set": user_updates}
+    if trusted_email:
+        user_updates.update({
+            "student_number": user.get("student_number") or gen_student_number(),
+            "verification_expiry": now + timedelta(days=365),
+        })
+        update["$inc"] = {"reward_points": 200}
+    await db.users.update_one({"_id": user["_id"]}, update)
+
+    if not trusted_email:
+        send_email(
+            user["email"],
+            "Student Verification Submitted",
+            verification_email_html(
+                "Your verification is under review",
+                "We received your college ID, selfie, and academic details. Our team will review them and email you once a decision is made.",
+                "Check verification status",
+                "/dashboard",
+            ),
+        )
+
+    fresh = await db.users.find_one({"_id": user["_id"]})
+    return {
+        "ok": True,
+        "verification_method": "college_email" if trusted_email else "document_review",
+        "user": serialize_user(fresh),
+    }
+
+
+async def get_admin_user(request: Request) -> dict:
+    user = await get_current_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Admin access required")
+    return user
+
+
+@api.get("/admin/verifications")
+async def list_verifications(status: Optional[str] = None, admin=Depends(get_admin_user)):
+    query = {"status": status} if status else {}
+    docs = await db.verifications.find(query).sort("submitted_at", -1).to_list(200)
+    result = []
+    for doc in docs:
+        student = await db.users.find_one({"_id": doc["user_id"]})
+        result.append({
+            "id": str(doc["_id"]),
+            "status": doc.get("status", "pending"),
+            "method": doc.get("method", "document_review"),
+            "college_name": doc.get("college_name", ""),
+            "course": doc.get("course", ""),
+            "year": doc.get("year", ""),
+            "student_id_number": doc.get("student_id_number", ""),
+            "college_id_image": doc.get("college_id_image", ""),
+            "selfie_image": doc.get("selfie_image", ""),
+            "student_email": student.get("email", "") if student else "",
+            "student_name": student.get("name", "") if student else "",
+            "submitted_at": doc.get("submitted_at"),
+            "reviewer_note": doc.get("reviewer_note", ""),
+        })
+    return result
+
+
+@api.patch("/admin/verifications/{verification_id}")
+async def review_verification(
+    verification_id: str, body: VerificationReviewIn, admin=Depends(get_admin_user)
+):
+    if body.status not in {"approved", "rejected"}:
+        raise HTTPException(400, "Verification status must be approved or rejected")
+    try:
+        verification_oid = ObjectId(verification_id)
+    except Exception:
+        raise HTTPException(404, "Verification not found")
+    verification = await db.verifications.find_one({"_id": verification_oid})
+    if not verification:
+        raise HTTPException(404, "Verification not found")
+    student = await db.users.find_one({"_id": verification["user_id"]})
+    if not student:
+        raise HTTPException(404, "Student not found")
+
+    now = datetime.now(timezone.utc)
     await db.verifications.update_one(
-        {"_id": doc["_id"]},
+        {"_id": verification_oid},
+        {"$set": {
+            "status": body.status,
+            "reviewed_at": now,
+            "reviewer_note": body.reviewer_note or "",
+            "reviewed_by": admin["_id"],
+        }},
+    )
+    user_updates = {"verification_status": body.status}
+    update: dict = {"$set": user_updates}
+    if body.status == "approved":
+        user_updates.update({
+            "student_number": student.get("student_number") or gen_student_number(),
+            "verification_expiry": now + timedelta(days=365),
+        })
+        if student.get("verification_status") != "approved":
+            update["$inc"] = {"reward_points": 200}
+    await db.users.update_one({"_id": student["_id"]}, update)
+
+    if verification.get("status") != body.status:
+        if body.status == "approved":
+            send_email(
+                student["email"],
+                "You're now a verified student!",
+                verification_email_html(
+                    "You're verified!",
+                    "Your verification was successful. Your student account is now verified and eligible for student discounts.",
+                    "View your student card",
+                    "/card",
+                ),
+            )
+        else:
+            send_email(
+                student["email"],
+                "Additional Information Required",
+                verification_email_html(
+                    "Additional information required",
+                    "We could not complete your verification. Please upload clearer, valid college ID and selfie documents, then submit your verification again.",
+                    "Resubmit verification",
+                    "/verify",
+                ),
+            )
+    fresh = await db.users.find_one({"_id": student["_id"]})
+    return {"ok": True, "user": serialize_user(fresh)}
+
+
+def _admin_datetime(value):
+    return value.isoformat() if value else None
+
+
+def serialize_admin_user(user: dict) -> dict:
+    """A deliberately limited user representation for the admin list endpoints."""
+    return {
+        "id": str(user["_id"]),
+        "name": user.get("name", ""),
+        "email": user.get("email", ""),
+        "college": user.get("college", ""),
+        "course": user.get("course", ""),
+        "year": user.get("year", ""),
+        "verification_status": user.get("verification_status", "not_submitted"),
+        "verification_submitted_at": _admin_datetime(user.get("verification_submitted_at")),
+        "verification_reviewed_at": _admin_datetime(user.get("verification_reviewed_at")),
+        "verification_rejection_reason": user.get("verification_rejection_reason", ""),
+        "created_at": _admin_datetime(user.get("created_at")),
+    }
+
+
+def serialize_admin_verification(doc: dict, include_images: bool = False) -> dict:
+    result = {
+        "id": str(doc["_id"]),
+        "user_id": str(doc["user_id"]),
+        "status": doc.get("status", "pending"),
+        "college_name": doc.get("college_name", ""),
+        "course": doc.get("course", ""),
+        "year": doc.get("year", ""),
+        "student_id_number": doc.get("student_id_number", ""),
+        "submitted_at": _admin_datetime(doc.get("submitted_at")),
+        "reviewed_at": _admin_datetime(doc.get("reviewed_at")),
+        "reviewer_note": doc.get("reviewer_note", ""),
+        "rejection_reason": doc.get("rejection_reason", ""),
+        "has_college_id_image": bool(doc.get("college_id_image")),
+        "has_selfie_image": bool(doc.get("selfie_image")),
+    }
+    if include_images:
+        # These are existing Base64 data URIs. Keep them out of lists so the
+        # dashboard remains responsive; send them only for an opened profile.
+        result["college_id_image"] = doc.get("college_id_image", "")
+        result["selfie_image"] = doc.get("selfie_image", "")
+        result["selfie_with_id"] = doc.get("selfie_image", "")
+    return result
+
+
+async def _review_pending_verification(
+    verification_id: str, status: str, rejection_reason: str, admin: dict
+) -> dict:
+    """Atomically review one pending document verification and notify the student."""
+    try:
+        verification_oid = ObjectId(verification_id)
+    except Exception:
+        raise HTTPException(404, "Verification request not found")
+
+    verification = await db.verifications.find_one(
+        {"_id": verification_oid, "status": "pending"}
+    )
+    if not verification:
+        existing = await db.verifications.find_one({"_id": verification_oid})
+        if not existing:
+            raise HTTPException(404, "Verification request not found")
+        raise HTTPException(409, "This verification request has already been reviewed")
+
+    student = await db.users.find_one({"_id": verification["user_id"]})
+    if not student:
+        raise HTTPException(404, "Student not found")
+
+    now = datetime.now(timezone.utc)
+    note = rejection_reason.strip() if status == "rejected" else ""
+    review = await db.verifications.update_one(
+        {"_id": verification_oid, "status": "pending"},
         {
             "$set": {
-                "status": "approved",
+                "status": status,
                 "reviewed_at": now,
-                "reviewer_note": "Auto-approved (demo)",
+                "reviewed_by": admin["_id"],
+                "reviewer_note": note,
+                "rejection_reason": note,
             }
         },
     )
+    if not review.matched_count:
+        raise HTTPException(409, "This verification request has already been reviewed")
 
-    fresh = await db.users.find_one({"_id": user["_id"]})
-    return {"ok": True, "user": serialize_user(fresh)}
+    user_updates = {
+        "verification_status": status,
+        "verification_reviewed_at": now,
+        "verified_by": str(admin["_id"]),
+        "verification_rejection_reason": note,
+    }
+    update: dict = {"$set": user_updates}
+    if status == "approved":
+        user_updates.update(
+            {
+                "student_number": student.get("student_number") or gen_student_number(),
+                "verification_expiry": now + timedelta(days=365),
+            }
+        )
+        if student.get("verification_status") != "approved":
+            update["$inc"] = {"reward_points": 200}
+    await db.users.update_one({"_id": student["_id"]}, update)
+
+    if status == "approved":
+        email_result = send_email(
+            student["email"],
+            "You're now a verified student!",
+            verification_email_html(
+                "You're verified!",
+                "Your verification was successful. Your student account is now verified and eligible for student discounts.",
+                "View your student card",
+                "/card",
+            ),
+        )
+    else:
+        reason_line = f" Reason: {html.escape(note)}." if note else ""
+        email_result = send_email(
+            student["email"],
+            "Additional Information Required",
+            verification_email_html(
+                "Additional information required",
+                "We could not complete your verification. Please upload clearer, valid college ID and selfie documents, then submit your verification again."
+                + reason_line,
+                "Resubmit verification",
+                "/verify",
+            ),
+        )
+
+    fresh = await db.users.find_one({"_id": student["_id"]})
+    return {
+        "ok": True,
+        "user": serialize_admin_user(fresh),
+        "email_sent": email_result["ok"],
+        "email_error": email_result["error"],
+    }
+
+
+@api.get("/admin/dashboard")
+async def admin_dashboard(admin=Depends(get_admin_user)):
+    """Summary data for the admin home. Counts use the source collections only."""
+    today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    student_query = {"role": {"$ne": "admin"}}
+    total_users, verified_students, pending, rejected, today_signups, brands = await asyncio.gather(
+        db.users.count_documents(student_query),
+        db.users.count_documents({**student_query, "verification_status": "approved"}),
+        db.verifications.count_documents({"status": "pending"}),
+        db.verifications.count_documents({"status": "rejected"}),
+        db.users.count_documents({**student_query, "created_at": {"$gte": today}}),
+        db.offers.distinct("brand"),
+    )
+    return {
+        "total_users": total_users,
+        "verified_students": verified_students,
+        "pending_verifications": pending,
+        "rejected_verifications": rejected,
+        "today_signups": today_signups,
+        "total_brands": len(brands),
+    }
+
+
+@api.get("/admin/users")
+async def admin_users(
+    status: Optional[str] = Query(None),
+    q: Optional[str] = Query(None, max_length=100),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    admin=Depends(get_admin_user),
+):
+    if status and status not in {"approved", "pending", "rejected", "not_submitted"}:
+        raise HTTPException(400, "Invalid verification status")
+    query: dict = {"role": {"$ne": "admin"}}
+    if status:
+        query["verification_status"] = status
+    if q and q.strip():
+        pattern = re.escape(q.strip())
+        query["$or"] = [
+            {"name": {"$regex": pattern, "$options": "i"}},
+            {"email": {"$regex": pattern, "$options": "i"}},
+            {"college": {"$regex": pattern, "$options": "i"}},
+        ]
+    total = await db.users.count_documents(query)
+    cursor = db.users.find(query).sort("created_at", -1).skip((page - 1) * page_size).limit(page_size)
+    users = [serialize_admin_user(user) async for user in cursor]
+    return {"items": users, "page": page, "page_size": page_size, "total": total}
+
+
+@api.get("/admin/pending-verifications")
+async def admin_pending_verifications(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    admin=Depends(get_admin_user),
+):
+    query = {"status": "pending"}
+    total = await db.users.count_documents(
+        {"role": {"$ne": "admin"}, "verification_status": "pending"}
+    )
+    cursor = db.verifications.find(query).sort("submitted_at", -1).skip((page - 1) * page_size).limit(page_size)
+    docs = [doc async for doc in cursor]
+    student_ids = [doc["user_id"] for doc in docs]
+    students = {
+        student["_id"]: student
+        async for student in db.users.find(
+            {"_id": {"$in": student_ids}, "verification_status": "pending"}
+        )
+    }
+    items = []
+    for doc in docs:
+        student = students.get(doc["user_id"])
+        if student:
+            item = serialize_admin_verification(doc)
+            item.update({"name": student.get("name", ""), "email": student.get("email", "")})
+            items.append(item)
+    return {"items": items, "page": page, "page_size": page_size, "total": total}
+
+
+@api.get("/admin/user/{user_id}")
+async def admin_user_detail(user_id: str, admin=Depends(get_admin_user)):
+    try:
+        user_oid = ObjectId(user_id)
+    except Exception:
+        raise HTTPException(404, "User not found")
+    user = await db.users.find_one({"_id": user_oid, "role": {"$ne": "admin"}})
+    if not user:
+        raise HTTPException(404, "User not found")
+    verification_docs = await db.verifications.find({"user_id": user_oid}).sort("submitted_at", -1).to_list(25)
+    return {
+        "user": serialize_admin_user(user),
+        "verifications": [serialize_admin_verification(doc, include_images=True) for doc in verification_docs],
+    }
+
+
+@api.post("/admin/approve-verification")
+async def admin_approve_verification(
+    body: AdminVerificationDecisionIn, admin=Depends(get_admin_user)
+):
+    return await _review_pending_verification(body.verification_id, "approved", "", admin)
+
+
+@api.post("/admin/reject-verification")
+async def admin_reject_verification(
+    body: AdminVerificationDecisionIn, admin=Depends(get_admin_user)
+):
+    reason = (body.rejection_reason or "").strip()
+    if not reason:
+        raise HTTPException(400, "A rejection reason is required")
+    return await _review_pending_verification(body.verification_id, "rejected", reason, admin)
 
 
 @api.get("/verification/status")
@@ -700,7 +1149,7 @@ async def verification_status(user=Depends(get_current_user)):
         {"user_id": user["_id"]}, sort=[("submitted_at", -1)]
     )
     return {
-        "status": user.get("verification_status", "unverified"),
+        "status": serialize_user(user)["verification_status"],
         "student_number": user.get("student_number", ""),
         "expiry": (
             user.get("verification_expiry").isoformat()
@@ -1853,6 +2302,13 @@ async def on_startup():
             [("user_id", 1), ("offer_id", 1)], unique=True
         )
         await db.coupons.create_index([("user_id", 1), ("offer_id", 1), ("status", 1)])
+        await db.users.create_index([("verification_status", 1), ("created_at", -1)])
+        await db.verifications.create_index([("status", 1), ("submitted_at", -1)])
+        await db.verifications.create_index(
+            "student_id_normalized",
+            unique=True,
+            partialFilterExpression={"student_id_normalized": {"$type": "string"}},
+        )
         await db.password_resets.create_index("expires_at", expireAfterSeconds=0)
     except Exception as e:
         logger.warning(f"Index warn: {e}")

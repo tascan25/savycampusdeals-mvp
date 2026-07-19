@@ -45,7 +45,7 @@
     "location": "Online"
   },
   {
-    "title": "Apple Music Student — ₹49/month",
+    "title": "Apple Music Student — ₹69/month",
     "brand": "Apple Music",
     "brand_logo": "https://upload.wikimedia.org/wikipedia/commons/2/2a/Apple_Music_icon.svg",
     "brand_url": "https://music.apple.com/in/student",
@@ -72,21 +72,6 @@
     "validity": "Ongoing",
     "featured": false,
     "trending": true,
-    "location": "Digital"
-  },
-  {
-    "title": "Coursera Plus — 50% OFF Annual",
-    "brand": "Coursera",
-    "brand_logo": "https://upload.wikimedia.org/wikipedia/commons/0/0f/Coursera_logo.svg",
-    "brand_url": "https://www.coursera.org/courseraplus",
-    "category": "Education",
-    "description": "Unlimited access to 7,000+ courses, Professional Certificates & Specializations. Great for portfolio building.",
-    "discount": "50% OFF",
-    "image_url": "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=1200",
-    "terms": "Verify via UNiDAYS. Applies to annual plan only.",
-    "validity": "Ongoing",
-    "featured": false,
-    "trending": false,
     "location": "Digital"
   },
   {
@@ -150,7 +135,7 @@
     "location": "Digital"
   },
   {
-    "title": "Premium Student — ₹59/month (50% OFF)",
+    "title": "Premium Student — ₹69/month (50% OFF)",
     "brand": "Spotify",
     "brand_logo": "https://upload.wikimedia.org/wikipedia/commons/1/19/Spotify_logo_without_text.svg",
     "brand_url": "https://www.spotify.com/in-en/student/",
@@ -253,5 +238,20 @@
   "featured": true,
   "trending": false,
   "location": "Pan India"
+},
+{
+  "title": "Free Professional Tools for Students",
+  "brand": "JetBrains",
+  "brand_logo": "https://resources.jetbrains.com/storage/products/company/brand/logos/jb_beam.svg",
+  "brand_url": "https://www.jetbrains.com/community/education/#students",
+  "category": "Developer Tools",
+  "description": "Verified students get free access to JetBrains' complete suite of professional IDEs and developer tools, including IntelliJ IDEA Ultimate, PyCharm Professional, WebStorm, Rider, CLion, DataGrip, PhpStorm, GoLand and more through the JetBrains Student Pack.",
+  "discount": "100% FREE",
+  "image_url": "https://resources.jetbrains.com/storage/products/company/brand/logos/jetbrains.png",
+  "terms": "Available to verified students with a valid educational email address or proof of student status. License is valid for one year and can be renewed while you remain a student.",
+  "validity": "Ongoing",
+  "featured": true,
+  "trending": true,
+  "location": "Worldwide"
 }
 ]
