@@ -6,6 +6,8 @@ import Navbar from "@/components/Navbar";
 import api from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 import OfferCard from "@/components/OfferCard";
+import MemberOverviewBanner from "@/components/MemberOverviewBanner";
+import { useAuth } from "@/context/AuthContext";
 
 const BRANDS = ["Spotify","Apple","YouTube","GitHub","Adobe","Figma","Notion","Canva","Swiggy","Zomato","Coursera","Microsoft","Amazon Prime"];
 
@@ -29,6 +31,7 @@ const FAQS = [
 ];
 
 export default function Landing() {
+  const { user, ready } = useAuth();
   const { data: offers = [] } = useQuery({
     queryKey: ["landing-offers"],
     queryFn: async () => (await api.get("/offers", { params: { sort: "featured" } })).data,
@@ -85,11 +88,15 @@ export default function Landing() {
               Verified college students unlock <span className="text-white font-semibold">real, exclusive deals</span> from Spotify, Apple, Swiggy, Zomato, GitHub, Adobe & 500+ more. Get your digital pass in <span className="text-emerald-300 font-semibold">under 60 seconds</span>.
             </p>
 
-            <div className="mt-9 flex flex-wrap gap-3">
-              <Link to="/signup" data-testid="hero-cta-primary" className="group inline-flex items-center gap-2 rounded-full bg-white text-black font-semibold px-7 py-3.5 hover:scale-[1.03] active:scale-[0.97] transition-transform shadow-[0_10px_40px_-10px_rgba(255,255,255,0.35)]">
-                Get your pass — free
-                <ArrowRight size={16} className="transition-transform group-hover:translate-x-0.5"/>
-              </Link>
+            <div className="mt-9 flex min-h-[52px] flex-wrap gap-3">
+              {!ready ? (
+                <div className="h-[52px] w-52 animate-pulse rounded-full bg-white/10" aria-label="Loading account actions" />
+              ) : (
+                <Link to={user ? "/card" : "/signup"} data-testid="hero-cta-primary" className="group inline-flex items-center gap-2 rounded-full bg-white text-black font-semibold px-7 py-3.5 hover:scale-[1.03] active:scale-[0.97] transition-transform shadow-[0_10px_40px_-10px_rgba(255,255,255,0.35)]">
+                  {user ? "View Your Student Pass" : "Get your pass — free"}
+                  <ArrowRight size={16} className="transition-transform group-hover:translate-x-0.5"/>
+                </Link>
+              )}
               <Link to="/offers" data-testid="hero-cta-secondary" className="inline-flex items-center gap-2 rounded-full glass-heavy px-7 py-3.5 hover:bg-white/10 transition-colors">
                 Browse offers
               </Link>
@@ -349,17 +356,27 @@ export default function Landing() {
       </section>
 
       {/* CTA */}
-      <section className="relative py-24">
-        <div className="max-w-4xl mx-auto px-6">
-          <div className="relative rounded-3xl p-10 md:p-16 text-center holo overflow-hidden border border-white/10">
-            <h2 className="font-display text-4xl md:text-6xl font-extrabold tracking-tighter">Ready to unlock your perks?</h2>
-            <p className="mt-4 text-zinc-300 max-w-xl mx-auto">Join thousands of Indian students already saving on their favourite brands.</p>
-            <Link to="/signup" data-testid="cta-signup" className="mt-8 inline-flex items-center gap-2 rounded-full bg-white text-black font-semibold px-6 py-3 hover:scale-[1.03] transition-transform">
-              Get your student pass <ArrowRight size={16}/>
-            </Link>
+      {!ready ? (
+        <section className="relative py-24" aria-label="Loading account overview">
+          <div className="max-w-4xl mx-auto px-6">
+            <div className="h-72 animate-pulse rounded-3xl border border-white/10 bg-white/5" />
           </div>
-        </div>
-      </section>
+        </section>
+      ) : user ? (
+        <MemberOverviewBanner user={user} />
+      ) : (
+        <section className="relative py-24">
+          <div className="max-w-4xl mx-auto px-6">
+            <div className="relative rounded-3xl p-10 md:p-16 text-center holo overflow-hidden border border-white/10">
+              <h2 className="font-display text-4xl md:text-6xl font-extrabold tracking-tighter">Ready to unlock your perks?</h2>
+              <p className="mt-4 text-zinc-300 max-w-xl mx-auto">Join thousands of Indian students already saving on their favourite brands.</p>
+              <Link to="/signup" data-testid="cta-signup" className="mt-8 inline-flex items-center gap-2 rounded-full bg-white text-black font-semibold px-6 py-3 hover:scale-[1.03] transition-transform">
+                Get your student pass <ArrowRight size={16}/>
+              </Link>
+            </div>
+          </div>
+        </section>
+      )}
 
       <footer className="relative border-t border-white/5 py-10 mt-10">
         <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-4 text-sm text-zinc-500">

@@ -13,7 +13,7 @@ const links = [
 ];
 
 export default function Navbar() {
-  const { user, logout } = useAuth();
+  const { user, ready, logout } = useAuth();
   const [open, setOpen] = useState(false);
   const nav = useNavigate();
 
@@ -48,7 +48,9 @@ export default function Navbar() {
           ))}
         </div>
         <div className="ml-auto flex items-center gap-2">
-          {user ? (
+          {!ready ? (
+            <div className="h-9 w-24 animate-pulse rounded-full bg-white/10" aria-label="Loading account navigation" />
+          ) : user ? (
             <>
               <Link to="/dashboard" data-testid="nav-avatar" className="hidden md:flex h-9 w-9 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 items-center justify-center text-sm font-bold">
                 {(user.name || "S")[0].toUpperCase()}
@@ -79,7 +81,7 @@ export default function Navbar() {
           {links.filter(l => !l.protected || user).map(l => (
             <Link key={l.to} to={l.to} onClick={() => setOpen(false)} className="text-zinc-300 hover:text-white py-2 px-2">{l.label}</Link>
           ))}
-          {!user && (
+          {ready && !user && (
             <>
               <Link to="/login" onClick={() => setOpen(false)} className="text-zinc-300 py-2 px-2">Login</Link>
               <Link to="/signup" onClick={() => setOpen(false)} className="rounded-full bg-white text-black font-semibold px-4 py-2 text-center">Get verified</Link>

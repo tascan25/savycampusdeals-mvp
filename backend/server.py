@@ -1557,6 +1557,9 @@ async def get_coupon(coupon_id: str, user=Depends(get_current_user)):
 @api.get("/dashboard/stats")
 async def dashboard_stats(user=Depends(get_current_user)):
     claimed = await db.coupons.count_documents({"user_id": user["_id"]})
+    redeemed = await db.coupons.count_documents(
+        {"user_id": user["_id"], "status": "redeemed"}
+    )
     active = await db.coupons.count_documents(
         {"user_id": user["_id"], "status": "active"}
     )
@@ -1564,6 +1567,7 @@ async def dashboard_stats(user=Depends(get_current_user)):
     total_offers = await db.offers.count_documents({})
     return {
         "claimed": claimed,
+        "redeemed": redeemed,
         "active": active,
         "saved": saved,
         "reward_points": user.get("reward_points", 0),

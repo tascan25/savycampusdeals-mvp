@@ -14,7 +14,11 @@ export default function Dashboard() {
   const { user, refreshUser } = useAuth();
   const verified = user?.verification_status === "approved";
 
-  const stats = useQuery({ queryKey: ["stats"], queryFn: async () => (await api.get("/dashboard/stats")).data });
+  const stats = useQuery({
+    queryKey: ["dashboard-stats", user?.id],
+    queryFn: async ({ signal }) => (await api.get("/dashboard/stats", { signal })).data,
+    enabled: Boolean(user?.id),
+  });
   const card = useQuery({
     queryKey: ["card"],
     queryFn: async () => (await api.get("/student-card")).data,
