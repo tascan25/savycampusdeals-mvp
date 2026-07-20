@@ -1,85 +1,65 @@
+
 [
   {
-    "name": "McDonald's",
-    "tagline": "I'm Lovin' It",
-    "cuisine": "Fast Food",
-    "city": "Noida",
-    "address": "Sector 18, Noida",
-    "lat": 28.57,
-    "lng": 77.32,
+    "name": "GOG Cafe & Bakers",
+    "tagline": "Fresh Bakes, Great Coffee & Good Vibes.",
+    "cuisine": "Cafe, Bakery",
+    "city": "Muradnagar",
+    "address": "Shivam Vihar, Asalat Nagar, Uttar Pradesh 201206",
 
-    "image_url": "https://images.unsplash.com/photo-1552566626-52f8b828add9?auto=format&fit=crop&w=1200&q=80",
+    "lat": 28.762030474827352,
+    "lng": 77.49228520504539,
 
-    "cover_url": "https://images.unsplash.com/photo-1552566626-52f8b828add9?auto=format&fit=crop&w=1600&q=80",
+    "image_url": "/images/outlets/gog-cafe/thumbnail.webp",
+    "cover_url": "/images/outlets/gog-cafe/cover.webp",
+    "logo_url": "/images/outlets/gog-cafe/logo.webp",
 
-    "logo_url": "https://upload.wikimedia.org/wikipedia/commons/4/4e/McDonald%27s_Golden_Arches.svg",
-
-    "phone": "+91 9876543210",
-    "hours": "10am – 11pm",
+    "phone": "+91 7017265684",
+    "hours": "12:30 PM – 11:00 PM",
     "rating": 4.5,
 
     "offers": [
       {
-        "title": "20% OFF McSaver Meals",
+        "title": "Exclusive Student Deal – 10% OFF",
         "category": "Food",
-        "discount": "20% OFF",
-        "description": "Available for verified students.",
-        "terms": "Valid once per day.",
-        "validity": "Till 31 Dec",
+        "discount": "10% OFF",
+        "description": "Verified students get 10% OFF on eligible orders above ₹399.",
+        "terms": "Valid once per student per day. Minimum order ₹399. Selected menu items are excluded.",
+        "validity": "Ongoing",
         "featured": true,
         "trending": true
-      },
-      {
-        "title": "Free Medium Fries",
-        "category": "Food",
-        "discount": "FREE",
-        "description": "On orders above ₹299.",
-        "terms": "Dine-in only.",
-        "validity": "Till 31 Dec",
-        "featured": false,
-        "trending": false
       }
     ]
   },
+
   {
-    "name": "Barbeque Nation",
-    "tagline": "The Ultimate Grill Experience",
-    "cuisine": "Buffet & BBQ",
-    "city": "Delhi",
-    "address": "N-79, Outer Circle, Connaught Place, New Delhi",
-    "lat": 28.6315,
-    "lng": 77.2167,
+    "name": "S Cafe",
+    "tagline": "Where Every Meal Feels Like a Treat.",
+    "cuisine": "Cafe, Fast Food",
+    "city": "Muradnagar",
+    "address": "&, Police Chowki, Near Railway Rd, Opp. Priya Cinema, Muradnagar, Uttar Pradesh 201206",
 
-    "image_url": "https://images.unsplash.com/photo-1552566626-52f8b828add9?auto=format&fit=crop&w=1200&q=80",
+    "lat": 28.76806169822196,
+    "lng": 77.50461707993645,
 
-    "cover_url": "https://images.unsplash.com/photo-1552566626-52f8b828add9?auto=format&fit=crop&w=1600&q=80",
+    "image_url": "/images/outlets/s-cafe/thumbnail.webp",
+    "cover_url": "/images/outlets/s-cafe/cover.webp",
+    "logo_url": "/images/outlets/s-cafe/logo.webp",
 
-    "logo_url": "https://upload.wikimedia.org/wikipedia/en/8/83/Barbeque_Nation_Logo.png",
-
-    "phone": "+91 9876543211",
-    "hours": "12pm – 10:30pm",
-    "rating": 4.4,
+    "phone": "+91 9289498883",
+    "hours": "11:00 AM – 10:30 PM",
+    "rating": 4.7,
 
     "offers": [
       {
-        "title": "Student Lunch Buffet",
+        "title": "Exclusive Student Deal – 10% OFF",
         "category": "Food",
-        "discount": "₹599",
-        "description": "Enjoy the weekday lunch buffet at a special student price with a valid college ID.",
-        "terms": "Valid Monday to Thursday. Student ID required. Taxes extra.",
+        "discount": "10% OFF",
+        "description": "Verified students enjoy 10% OFF on the entire menu.",
+        "terms": "Valid once per student per day. Minimum order ₹99. Applicable all days of the week.",
         "validity": "Ongoing",
         "featured": true,
         "trending": true
-      },
-      {
-        "title": "Free Soft Drink",
-        "category": "Food",
-        "discount": "FREE",
-        "description": "Get one complimentary soft drink with any buffet purchase.",
-        "terms": "Valid with student buffet offer only.",
-        "validity": "Ongoing",
-        "featured": false,
-        "trending": false
       }
     ]
   }
