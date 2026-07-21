@@ -25,8 +25,11 @@ REQUIRED_LOCAL_OFFER_FIELDS = [
     "discount",
     "description",
     "terms",
+    "redemption_policy",
     "validity",
 ]
+
+VALID_REDEMPTION_POLICIES = {"daily", "monthly", "unlimited", "once"}
 
 
 # ----------------------------
@@ -90,6 +93,12 @@ def validate_local_offers(outlet_name, offers):
                 )
 
         title = offer["title"].strip().lower()
+
+        if offer["redemption_policy"] not in VALID_REDEMPTION_POLICIES:
+            raise ValueError(
+                f"Offer '{offer['title']}' in '{outlet_name}' has an invalid "
+                f"redemption_policy '{offer['redemption_policy']}'"
+            )
 
         if title in seen_titles:
             raise ValueError(

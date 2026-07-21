@@ -183,14 +183,20 @@ def _aware(dt):
     return dt
 
 
-def is_daily_outlet_offer(offer: dict) -> bool:
-    """Whether an outlet offer permits one redeemed deal per calendar day."""
-    policy = offer.get("redemption_policy", "").lower()
-    if policy == "daily":
-        return True
+def get_redemption_policy(offer: dict) -> str:
+    """Return the configured redemption policy with a legacy-safe fallback."""
+    policy = offer.get("redemption_policy", "").strip().lower()
+    if policy in {"daily", "monthly", "unlimited", "once"}:
+        return policy
     # Existing partner offers predate the explicit policy field. Preserve their
     # stated once-per-day terms until they are next imported with the field.
-    return "once per student per day" in offer.get("terms", "").lower()
+    if "once per student per day" in offer.get("terms", "").lower():
+        return "daily"
+    return "new_offer"
+
+
+def is_daily_outlet_offer(offer: dict) -> bool:
+    return get_redemption_policy(offer) == "daily"
 
 
 def india_day_bounds(now: Optional[datetime] = None) -> tuple[datetime, datetime]:
@@ -201,6 +207,17 @@ def india_day_bounds(now: Optional[datetime] = None) -> tuple[datetime, datetime
         local_start.astimezone(timezone.utc),
         (local_start + timedelta(days=1)).astimezone(timezone.utc),
     )
+
+
+def india_month_bounds(now: Optional[datetime] = None) -> tuple[datetime, datetime]:
+    """UTC bounds for the current calendar month in India."""
+    local_now = (now or datetime.now(timezone.utc)).astimezone(INDIA_TIMEZONE)
+    local_start = local_now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if local_start.month == 12:
+        local_end = local_start.replace(year=local_start.year + 1, month=1)
+    else:
+        local_end = local_start.replace(month=local_start.month + 1)
+    return local_start.astimezone(timezone.utc), local_end.astimezone(timezone.utc)
 
 
 DEV_OTP_FALLBACK = os.environ.get("DEV_OTP_FALLBACK", "true").lower() == "true"
@@ -1406,11 +1423,12 @@ async def claim_offer(offer_id: str, user=Depends(get_verified_user)):
         else:
             return serialize_coupon(existing, offer)
 
-    # Outlet policy: daily partner offers reset at midnight India time. Other
-    # outlet offers retain the existing "newer deal required" behaviour.
+    # Apply the policy configured on this specific outlet offer. Every issued
+    # QR still keeps the same 30-day expiry below.
     outlet_oid = offer.get("outlet_id")
     if outlet_oid:
-        if is_daily_outlet_offer(offer):
+        policy = get_redemption_policy(offer)
+        if policy == "daily":
             day_start, day_end = india_day_bounds(now)
             redeemed_today = await db.coupons.find_one(
                 {
@@ -1425,7 +1443,28 @@ async def claim_offer(offer_id: str, user=Depends(get_verified_user)):
                     409,
                     "You've already redeemed today's deal at this outlet. Please come back tomorrow.",
                 )
-        else:
+        elif policy == "monthly":
+            month_start, month_end = india_month_bounds(now)
+            redeemed_this_month = await db.coupons.find_one(
+                {
+                    "user_id": user["_id"],
+                    "offer_id": oid,
+                    "status": "redeemed",
+                    "redeemed_at": {"$gte": month_start, "$lt": month_end},
+                }
+            )
+            if redeemed_this_month:
+                raise HTTPException(
+                    409,
+                    "You've already redeemed this monthly deal. Please come back next month.",
+                )
+        elif policy == "once":
+            redeemed_once = await db.coupons.find_one(
+                {"user_id": user["_id"], "offer_id": oid, "status": "redeemed"}
+            )
+            if redeemed_once:
+                raise HTTPException(409, "This one-time offer has already been redeemed.")
+        elif policy == "new_offer":
             last_redeemed = await db.coupons.find_one(
                 {"user_id": user["_id"], "outlet_id": outlet_oid, "status": "redeemed"},
                 sort=[("redeemed_at", -1)],
@@ -1666,40 +1705,82 @@ async def get_outlet(outlet_id: str, request: Request):
     saved_ids: set = set()
     already_redeemed_outlet = False
     outlet_claim_message = ""
+    offer_claim_states: dict = {}
     try:
         user = await get_current_user(request)
         saved = await db.saved_offers.find({"user_id": user["_id"]}).to_list(500)
         saved_ids = {str(s["offer_id"]) for s in saved}
-        if any(is_daily_outlet_offer(offer) for offer in offers):
-            day_start, day_end = india_day_bounds()
-            already_redeemed_outlet = bool(
-                await db.coupons.find_one(
-                    {
-                        "user_id": user["_id"],
-                        "outlet_id": oid,
-                        "status": "redeemed",
-                        "redeemed_at": {"$gte": day_start, "$lt": day_end},
-                    }
+        redeemed_coupons = await db.coupons.find(
+            {"user_id": user["_id"], "outlet_id": oid, "status": "redeemed"}
+        ).sort("redeemed_at", -1).to_list(500)
+        day_start, day_end = india_day_bounds()
+        month_start, month_end = india_month_bounds()
+        last_redeemed = redeemed_coupons[0] if redeemed_coupons else None
+        last_offer = (
+            await db.offers.find_one({"_id": last_redeemed["offer_id"]})
+            if last_redeemed
+            else None
+        )
+
+        for offer in offers:
+            policy = get_redemption_policy(offer)
+            blocked = False
+            message = ""
+            if policy == "daily":
+                blocked = any(
+                    coupon.get("redeemed_at")
+                    and day_start <= _aware(coupon["redeemed_at"]) < day_end
+                    for coupon in redeemed_coupons
                 )
-            )
-            outlet_claim_message = (
-                "You've already redeemed today's deal here. Please come back tomorrow."
-            )
-        else:
-            already_redeemed_outlet = bool(
-                await db.coupons.find_one(
-                    {"user_id": user["_id"], "outlet_id": oid, "status": "redeemed"}
+                message = "You've already redeemed today's deal here. Please come back tomorrow."
+            elif policy == "monthly":
+                blocked = any(
+                    coupon.get("offer_id") == offer["_id"]
+                    and coupon.get("redeemed_at")
+                    and month_start <= _aware(coupon["redeemed_at"]) < month_end
+                    for coupon in redeemed_coupons
                 )
-            )
-            outlet_claim_message = (
-                "You've already redeemed a deal here. You can claim a fresh one once this outlet posts a newer deal."
-            )
+                message = "You've already redeemed this monthly deal. Please come back next month."
+            elif policy == "once":
+                blocked = any(
+                    coupon.get("offer_id") == offer["_id"] for coupon in redeemed_coupons
+                )
+                message = "This one-time offer has already been redeemed."
+            elif policy == "new_offer" and last_redeemed:
+                last_created = _aware(last_offer.get("created_at")) if last_offer else None
+                this_created = _aware(offer.get("created_at"))
+                blocked = bool(last_created and this_created and this_created <= last_created)
+                message = "You've already redeemed a deal here. You can claim a fresh one once this outlet posts a newer deal."
+
+            offer_claim_states[str(offer["_id"])] = {
+                "claim_blocked": blocked,
+                "claim_message": message if blocked else "",
+            }
+
+        blocked_messages = [
+            state["claim_message"]
+            for state in offer_claim_states.values()
+            if state["claim_blocked"]
+        ]
+        already_redeemed_outlet = bool(blocked_messages)
+        if blocked_messages:
+            outlet_claim_message = blocked_messages[0]
     except Exception:
         pass
 
+    serialized_offers = []
+    for offer in offers:
+        serialized = serialize_offer(offer, saved_ids)
+        serialized.update(
+            offer_claim_states.get(
+                str(offer["_id"]), {"claim_blocked": False, "claim_message": ""}
+            )
+        )
+        serialized_offers.append(serialized)
+
     return {
         **serialize_outlet(outlet, len(offers)),
-        "offers": [serialize_offer(o, saved_ids) for o in offers],
+        "offers": serialized_offers,
         "already_redeemed_here": already_redeemed_outlet,
         "claim_message": outlet_claim_message,
     }
@@ -1864,31 +1945,80 @@ async def scan_redeem(body: ScanIn):
 
     now = datetime.now(timezone.utc)
     offer = await db.offers.find_one({"_id": c["offer_id"]})
-    if c.get("outlet_id") and offer and is_daily_outlet_offer(offer):
-        day_start, day_end = india_day_bounds(now)
-        already_redeemed = await db.coupons.find_one(
-            {
-                "user_id": c["user_id"],
-                "outlet_id": c["outlet_id"],
-                "status": "redeemed",
-                "redeemed_at": {"$gte": day_start, "$lt": day_end},
-                "_id": {"$ne": c["_id"]},
-            }
-        )
-        if already_redeemed:
-            raise HTTPException(409, "This student has already redeemed today's deal at this outlet.")
-        try:
-            await db.outlet_daily_redemptions.insert_one(
+    if c.get("outlet_id") and offer:
+        policy = get_redemption_policy(offer)
+        if policy == "daily":
+            day_start, day_end = india_day_bounds(now)
+            already_redeemed = await db.coupons.find_one(
                 {
                     "user_id": c["user_id"],
                     "outlet_id": c["outlet_id"],
-                    "day": day_start,
-                    "coupon_id": c["_id"],
-                    "created_at": now,
+                    "status": "redeemed",
+                    "redeemed_at": {"$gte": day_start, "$lt": day_end},
+                    "_id": {"$ne": c["_id"]},
                 }
             )
-        except DuplicateKeyError:
-            raise HTTPException(409, "This student has already redeemed today's deal at this outlet.")
+            if already_redeemed:
+                raise HTTPException(409, "This student has already redeemed today's deal at this outlet.")
+            try:
+                await db.outlet_daily_redemptions.insert_one(
+                    {
+                        "user_id": c["user_id"],
+                        "outlet_id": c["outlet_id"],
+                        "day": day_start,
+                        "coupon_id": c["_id"],
+                        "created_at": now,
+                    }
+                )
+            except DuplicateKeyError:
+                raise HTTPException(409, "This student has already redeemed today's deal at this outlet.")
+        elif policy == "monthly":
+            month_start, month_end = india_month_bounds(now)
+            already_redeemed = await db.coupons.find_one(
+                {
+                    "user_id": c["user_id"],
+                    "offer_id": c["offer_id"],
+                    "status": "redeemed",
+                    "redeemed_at": {"$gte": month_start, "$lt": month_end},
+                    "_id": {"$ne": c["_id"]},
+                }
+            )
+            if already_redeemed:
+                raise HTTPException(409, "This student has already redeemed this month's deal.")
+            try:
+                await db.offer_monthly_redemptions.insert_one(
+                    {
+                        "user_id": c["user_id"],
+                        "offer_id": c["offer_id"],
+                        "month": month_start,
+                        "coupon_id": c["_id"],
+                        "created_at": now,
+                    }
+                )
+            except DuplicateKeyError:
+                raise HTTPException(409, "This student has already redeemed this month's deal.")
+        elif policy == "once":
+            already_redeemed = await db.coupons.find_one(
+                {
+                    "user_id": c["user_id"],
+                    "offer_id": c["offer_id"],
+                    "status": "redeemed",
+                    "_id": {"$ne": c["_id"]},
+                }
+            )
+            if already_redeemed:
+                raise HTTPException(409, "This one-time offer has already been redeemed.")
+            try:
+                await db.offer_once_redemptions.insert_one(
+                    {
+                        "user_id": c["user_id"],
+                        "offer_id": c["offer_id"],
+                        "coupon_id": c["_id"],
+                        "created_at": now,
+                    }
+                )
+            except DuplicateKeyError:
+                raise HTTPException(409, "This one-time offer has already been redeemed.")
 
     redeemed = await db.coupons.update_one(
         {"_id": c["_id"], "status": "active"},
@@ -2407,6 +2537,12 @@ async def on_startup():
         await db.verifications.create_index([("status", 1), ("submitted_at", -1)])
         await db.outlet_daily_redemptions.create_index(
             [("user_id", 1), ("outlet_id", 1), ("day", 1)], unique=True
+        )
+        await db.offer_monthly_redemptions.create_index(
+            [("user_id", 1), ("offer_id", 1), ("month", 1)], unique=True
+        )
+        await db.offer_once_redemptions.create_index(
+            [("user_id", 1), ("offer_id", 1)], unique=True
         )
         await db.verifications.create_index(
             "student_id_normalized",

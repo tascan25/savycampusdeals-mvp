@@ -64,5 +64,123 @@
         "trending": true
       }
     ]
-  }
+  },
+  {
+  "name": "Kamdhenu Mart",
+  "tagline": "Your Everyday Grocery Partner.",
+  "cuisine": "Supermarket, Grocery",
+  "city": "Muradnagar",
+  "address": "Shop No. 5, Landcraft Metro Homes, Basantpur, Saitili, Duhai, Muradnagar, Ghaziabad, Uttar Pradesh 201206",
+
+  "lat": 28.74493663107339,
+  "lng": 77.48298177116388,
+
+  "image_url": "/images/outlets/kamdhenu/thumbnail.webp",
+  "cover_url": "/images/outlets/kamdhenu/cover.webp",
+  "logo_url": "/images/outlets/kamdhenu/logo.webp",
+
+  "phone": "+91 7819016359",
+  "hours": "7:00 AM – 11:00 PM",
+  "rating": 5.0,
+
+  "offers": [
+    {
+      "title": "Exclusive Student Deal – 10% OFF Monthly Shopping",
+      "category": "Grocery",
+      "discount": "10% OFF",
+      "description": "Verified students get 10% OFF on monthly shopping bills above ₹1,000.",
+      "terms": "Valid once per student per month. Minimum purchase ₹1,000.",
+      "redemption_policy": "monthly",
+      "validity": "Ongoing",
+      "featured": true,
+      "trending": true
+    }
+  ]
+},
+{
+  "name": "CRAVINGS",
+  "tagline": "Delicious Food & Unlimited Cravings.",
+  "cuisine": "Fast Food, Cafe",
+  "city": "Muradnagar",
+  "address": "Landcraft Metro Homes, 58, Meerut Road, Duhai, Basantpur Saitli, Uttar Pradesh 201206",
+
+  "lat": 28.74474966514634,
+  "lng": 77.4830239441806,
+
+  "image_url": "/images/outlets/cravings/thumbnail.webp",
+  "cover_url": "/images/outlets/cravings/cover.webp",
+  "logo_url": "/images/outlets/cravings/logo.webp",
+
+  "phone": "+91 7819016359",
+  "hours": "11:00 AM – 11:00 PM",
+  "rating": 4.8,
+
+  "offers": [
+    {
+      "title": "Exclusive Student Deal – 10% OFF",
+      "category": "Food",
+      "discount": "10% OFF",
+      "description": "Verified students get 10% OFF on the full menu after scanning the student barcode from SavyCampusDeals.",
+      "terms": "Minimum order ₹60. Valid on the full menu. Student barcode must be scanned before billing. Offer can be redeemed once per student throughout the day.",
+      "redemption_policy": "daily",
+      "validity": "Ongoing",
+      "featured": true,
+      "trending": true
+    }
+  ]
+},
+{
+  "name": "BEAST A Fitness Junction",
+  "tagline": "Train Hard. Save More.",
+  "cuisine": "Gym, Fitness Center",
+  "city": "Muradnagar",
+  "address": "Near KIET College, Gali No. 3, Meerut Road, Muradnagar, Uttar Pradesh 201206",
+
+  "lat": 28.753392704287315,
+  "lng": 77.49629031349163,
+
+  "image_url": "/images/outlets/beast-fitness-junction/thumbnail.webp",
+  "cover_url": "/images/outlets/beast-fitness-junction/cover.webp",
+  "logo_url": "/images/outlets/beast-fitness-junction/logo.webp",
+
+  "phone": "+91 8077970737",
+  "hours": "5:00 AM – 11:00 PM",
+  "rating": 4.9,
+
+  "offers": [
+    {
+      "title": "Exclusive Student Deal – 10% OFF (1 Month Membership)",
+      "category": "Fitness",
+      "discount": "10% OFF",
+      "description": "Verified students get 10% OFF on a 1-month gym membership.",
+      "terms": "Valid on a 1-month membership plan only. Student verification is mandatory.",
+      "redemption_policy": "once",
+      "validity": "Ongoing",
+      "featured": true,
+      "trending": true
+    },
+    {
+      "title": "Exclusive Student Deal – 15% OFF (2 Month Membership)",
+      "category": "Fitness",
+      "discount": "15% OFF",
+      "description": "Verified students get 15% OFF on a 2-month gym membership.",
+      "terms": "Valid on a 2-month membership plan only. Student verification is mandatory.",
+      "redemption_policy": "once",
+      "validity": "Ongoing",
+      "featured": false,
+      "trending": true
+    },
+    {
+      "title": "Exclusive Student Deal – 20% OFF (3 Month Membership)",
+      "category": "Fitness",
+      "discount": "20% OFF",
+      "description": "Verified students get 20% OFF on a 3-month gym membership.",
+      "terms": "Valid on a 3-month membership plan only. Student verification is mandatory.",
+      "redemption_policy": "once",
+      "validity": "Ongoing",
+      "featured": false,
+      "trending": true
+    }
+  ]
+}
 ]

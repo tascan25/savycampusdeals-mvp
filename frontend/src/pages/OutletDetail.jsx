@@ -104,13 +104,14 @@ export default function OutletDetail() {
                     <div className="font-display text-lg font-bold mt-1">{o.title}</div>
                     <div className="text-sm text-zinc-400 mt-1 line-clamp-2">{o.description}</div>
                     <div className="text-[11px] text-zinc-500 mt-2">{o.terms} · {o.validity}</div>
+                    {o.claim_blocked && <div className="text-xs text-amber-300 mt-2">{o.claim_message}</div>}
                   </div>
                   <div className="flex md:flex-col items-center md:items-end gap-3 shrink-0">
                     <div className="font-display text-2xl font-extrabold text-white">{o.discount}</div>
                     <button
                       data-testid={`outlet-claim-btn-${o.id}`}
                       onClick={() => claim(o.id)}
-                      disabled={claimingId === o.id || outlet.already_redeemed_here || (user && !canClaim)}
+                      disabled={claimingId === o.id || o.claim_blocked || (user && !canClaim)}
                       className="rounded-full bg-white text-black text-sm font-semibold px-4 py-2 hover:scale-[1.03] active:scale-[0.97] transition-transform disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
                     >
                       {claimingId === o.id ? <Loader2 size={14} className="animate-spin" /> : <><Ticket size={14} /> Claim</>}
