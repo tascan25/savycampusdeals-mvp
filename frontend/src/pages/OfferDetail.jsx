@@ -54,6 +54,17 @@ export default function OfferDetail() {
   );
 
   const canClaim = user?.verification_status === "approved";
+  const rawClaimsCount = Number(offer.claims_count);
+  const claimsCount = Number.isFinite(rawClaimsCount) && rawClaimsCount >= 0
+    ? Math.floor(rawClaimsCount)
+    : 0;
+  const claimsLabel = `${claimsCount.toLocaleString("en-IN")} ${claimsCount === 1 ? "Student" : "Students"}`;
+  const validity = typeof offer.validity === "string" && offer.validity.trim()
+    ? offer.validity
+    : "Ongoing";
+  const outletHours = typeof offer.outlet_hours === "string" && offer.outlet_hours.trim()
+    ? offer.outlet_hours
+    : "Contact outlet";
 
   return (
     <div className="min-h-screen bg-[#050505] grain">
@@ -83,16 +94,37 @@ export default function OfferDetail() {
               <p className="text-zinc-400 mt-4 leading-relaxed">{offer.description}</p>
             </div>
 
-            <div className="mt-8 grid sm:grid-cols-2 gap-4">
-              <div className="glass rounded-2xl p-5">
-                <div className="text-[10px] uppercase tracking-widest text-zinc-500">Validity</div>
-                <div className="font-display font-semibold mt-1">{offer.validity}</div>
+            {offer.outlet_id ? (
+              <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-4" data-testid="outlet-offer-info-grid">
+                <div className="glass rounded-2xl p-5 min-w-0">
+                  <div className="text-[10px] uppercase tracking-widest text-zinc-500">Validity</div>
+                  <div className="font-display font-semibold mt-1 break-words" data-testid="outlet-offer-validity">{validity}</div>
+                </div>
+                <div className="glass rounded-2xl p-5 min-w-0">
+                  <div className="text-[10px] uppercase tracking-widest text-zinc-500">Verified offer</div>
+                  <div className="font-display font-semibold mt-1" data-testid="outlet-offer-verified">✓ Partner Verified</div>
+                </div>
+                <div className="glass rounded-2xl p-5 min-w-0">
+                  <div className="text-[10px] uppercase tracking-widest text-zinc-500">Hours</div>
+                  <div className="font-display font-semibold mt-1 break-words" data-testid="outlet-offer-hours">{outletHours}</div>
+                </div>
+                <div className="glass rounded-2xl p-5 min-w-0">
+                  <div className="text-[10px] uppercase tracking-widest text-zinc-500">Claimed by</div>
+                  <div className="font-display font-semibold mt-1" data-testid="outlet-offer-claims">{claimsLabel}</div>
+                </div>
               </div>
-              <div className="glass rounded-2xl p-5">
-                <div className="text-[10px] uppercase tracking-widest text-zinc-500">Claimed by</div>
-                <div className="font-display font-semibold mt-1">{offer.claims_count.toLocaleString()} students</div>
+            ) : (
+              <div className="mt-8 grid sm:grid-cols-2 gap-4">
+                <div className="glass rounded-2xl p-5">
+                  <div className="text-[10px] uppercase tracking-widest text-zinc-500">Validity</div>
+                  <div className="font-display font-semibold mt-1">{offer.validity}</div>
+                </div>
+                <div className="glass rounded-2xl p-5">
+                  <div className="text-[10px] uppercase tracking-widest text-zinc-500">Claimed by</div>
+                  <div className="font-display font-semibold mt-1">{offer.claims_count.toLocaleString()} students</div>
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="mt-8 glass rounded-2xl p-5">
               <div className="text-[10px] uppercase tracking-widest text-zinc-500">Terms & Conditions</div>

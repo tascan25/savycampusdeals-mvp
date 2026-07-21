@@ -30,9 +30,18 @@ const statusStyle = {
   not_submitted: "bg-zinc-500/10 text-zinc-300 border-zinc-400/20",
 };
 
-const dateText = (value) => value ? new Intl.DateTimeFormat("en-IN", {
-  day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
-}).format(new Date(value)) : "—";
+const dateText = (value) => {
+  if (!value) return "—";
+  // MongoDB returns UTC datetimes without an offset. Treat those values as UTC
+  // before formatting so the admin's browser timezone cannot shift signup times.
+  const normalized = /(?:Z|[+-]\d{2}:?\d{2})$/.test(value) ? value : `${value}Z`;
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return "—";
+  return `${new Intl.DateTimeFormat("en-IN", {
+    day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
+    timeZone: "Asia/Kolkata",
+  }).format(date)} IST`;
+};
 
 function StatusBadge({ status }) {
   return <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold capitalize ${statusStyle[status] || statusStyle.not_submitted}`}>{(status || "not submitted").replace("_", " ")}</span>;

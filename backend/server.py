@@ -1343,7 +1343,13 @@ async def get_offer(offer_id: str, request: Request):
             saved_ids.add(offer_id)
     except Exception:
         pass
-    return serialize_offer(o, saved_ids)
+    result = serialize_offer(o, saved_ids)
+    if o.get("outlet_id"):
+        outlet = await db.outlets.find_one(
+            {"_id": o["outlet_id"]}, {"hours": 1}
+        )
+        result["outlet_hours"] = outlet.get("hours", "") if outlet else ""
+    return result
 
 
 @api.post("/offers/{offer_id}/save")
