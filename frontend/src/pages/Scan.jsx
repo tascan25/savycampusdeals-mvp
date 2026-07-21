@@ -2,10 +2,12 @@ import React, { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Html5Qrcode } from "html5-qrcode";
+import { useQuery } from "@tanstack/react-query";
 import { QrCode, ScanLine, BadgeCheck, ShieldAlert, Ticket, CheckCircle2, X, Camera, Keyboard, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import Navbar from "@/components/Navbar";
 import api, { formatApiError } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 
 function ResultCard({ result, onRedeem, onClose, redeeming }) {
   if (!result) return null;
@@ -135,6 +137,7 @@ function ResultCard({ result, onRedeem, onClose, redeeming }) {
 }
 
 export default function Scan() {
+  const { user } = useAuth();
   const location = useLocation();
   const urlParams = new URLSearchParams(location.search);
   const urlCode = urlParams.get("c");         // coupon code
@@ -152,6 +155,10 @@ export default function Scan() {
   const readerId = "qr-reader-region";
   const activeRef = useRef(false);
   const autoLookupRef = useRef(false);
+  const partner = useQuery({
+    queryKey: ["partner-profile"],
+    queryFn: async () => (await api.get("/partner/profile")).data,
+  });
 
   const lookup = async (payload) => {
     setErr("");
@@ -255,6 +262,10 @@ export default function Scan() {
           <div className="text-[10px] uppercase tracking-[0.3em] text-emerald-400 flex items-center gap-2"><ScanLine size={12}/> Restaurant scanner</div>
           <h1 className="font-display text-4xl md:text-5xl font-extrabold tracking-tighter mt-2">Scan a Savy pass or coupon.</h1>
           <p className="text-zinc-400 mt-3">Point your camera at the student's QR to verify them or redeem a coupon.</p>
+          <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-200" data-testid="scanner-outlet-badge">
+            <BadgeCheck size={13} />
+            {user?.role === "admin" ? "Admin scanner access" : partner.isLoading ? "Loading outlet…" : partner.data?.outlet?.name || "Outlet assignment unavailable"}
+          </div>
         </motion.div>
 
         {/* Mode switch */}
@@ -321,7 +332,7 @@ export default function Scan() {
         </div>
 
         <div className="mt-10 text-xs text-zinc-500 text-center">
-          Business partner? Bookmark this page. <Link to="/" className="text-white hover:text-emerald-300 underline">Home →</Link>
+          Signed in as {partner.data?.name || user?.name || "partner"}. <Link to="/" className="text-white hover:text-emerald-300 underline">Home →</Link>
         </div>
       </div>
     </div>

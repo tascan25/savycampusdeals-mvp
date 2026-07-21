@@ -151,8 +151,13 @@ class TestScanLookupExpandedCoupon:
         assert cl.status_code == 200, cl.text
         code = cl.json()["code"]
 
-        # Public scan lookup
-        sc = requests.post(f"{API}/scan/lookup", json={"payload": code})
+        # Authenticated scanner lookup (admin access is allowed for support/testing)
+        admin_login = requests.post(f"{API}/auth/login", json={
+            "email": "admin@savycampusdeals.in", "password": "Admin@123",
+        })
+        assert admin_login.status_code == 200, admin_login.text
+        scanner_headers = {"Authorization": f"Bearer {admin_login.json()['token']}"}
+        sc = requests.post(f"{API}/scan/lookup", json={"payload": code}, headers=scanner_headers)
         assert sc.status_code == 200, sc.text
         data = sc.json()
         assert data["kind"] == "coupon"

@@ -40,7 +40,7 @@ export default function App() {
           <Route path="/offers/:id" element={<OfferDetail />} />
           <Route path="/outlets" element={<Outlets />} />
           <Route path="/outlets/:id" element={<OutletDetail />} />
-          <Route path="/scan" element={<Scan />} />
+          <Route path="/scan" element={<ProtectedRoute requirePartner><Scan /></ProtectedRoute>} />
           <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/verify" element={<ProtectedRoute><Verify /></ProtectedRoute>} />
           <Route path="/card" element={<ProtectedRoute><StudentCard /></ProtectedRoute>} />

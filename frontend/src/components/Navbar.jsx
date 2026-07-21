@@ -7,7 +7,6 @@ import { useAuth } from "@/context/AuthContext";
 const links = [
   { to: "/offers", label: "Offers" },
   { to: "/outlets", label: "Outlets" },
-  { to: "/scan", label: "Scan" },
   { to: "/dashboard", label: "Dashboard", protected: true },
   { to: "/card", label: "My Card", protected: true },
 ];
@@ -16,6 +15,10 @@ export default function Navbar() {
   const { user, ready, logout } = useAuth();
   const [open, setOpen] = useState(false);
   const nav = useNavigate();
+  const visibleLinks = user?.role === "outlet_partner"
+    ? [{ to: "/scan", label: "Scanner" }]
+    : links.filter(l => !l.protected || user?.role === "student");
+  const accountHome = user?.role === "outlet_partner" ? "/scan" : user?.role === "admin" ? "/admin" : "/dashboard";
 
   return (
     <div className="fixed top-4 inset-x-0 z-50 flex justify-center px-4" data-testid="navbar-root">
@@ -32,7 +35,7 @@ export default function Navbar() {
           <span className="font-display font-bold tracking-tight text-white text-lg">Savy<span className="text-indigo-400">.</span></span>
         </Link>
         <div className="hidden md:flex items-center gap-1 ml-2">
-          {links.filter(l => !l.protected || user).map(l => (
+          {visibleLinks.map(l => (
             <NavLink
               key={l.to}
               to={l.to}
@@ -52,7 +55,7 @@ export default function Navbar() {
             <div className="h-9 w-24 animate-pulse rounded-full bg-white/10" aria-label="Loading account navigation" />
           ) : user ? (
             <>
-              <Link to="/dashboard" data-testid="nav-avatar" className="hidden md:flex h-9 w-9 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 items-center justify-center text-sm font-bold">
+              <Link to={accountHome} data-testid="nav-avatar" className="hidden md:flex h-9 w-9 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 items-center justify-center text-sm font-bold">
                 {(user.name || "S")[0].toUpperCase()}
               </Link>
               <button
@@ -78,7 +81,7 @@ export default function Navbar() {
       </motion.nav>
       {open && (
         <div className="md:hidden absolute top-16 left-4 right-4 glass-heavy rounded-2xl p-4 flex flex-col gap-2" data-testid="nav-mobile-menu">
-          {links.filter(l => !l.protected || user).map(l => (
+          {visibleLinks.map(l => (
             <Link key={l.to} to={l.to} onClick={() => setOpen(false)} className="text-zinc-300 hover:text-white py-2 px-2">{l.label}</Link>
           ))}
           {ready && !user && (

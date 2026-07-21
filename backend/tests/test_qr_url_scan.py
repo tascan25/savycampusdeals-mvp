@@ -147,11 +147,11 @@ def test_claim_coupon_qr_is_url(api, admin_token, student):
     STATE["sn"] = sc["student_number"]
 
 
-def test_scan_lookup_url_coupon(api):
+def test_scan_lookup_url_coupon(api, admin_token):
     code = STATE["code"]
     assert code, "prior test did not produce a code"
     url_payload = f"{FRONTEND_URL}/scan?c={code}"
-    r = api.post(f"{BASE_URL}/api/scan/lookup", json={"payload": url_payload})
+    r = api.post(f"{BASE_URL}/api/scan/lookup", json={"payload": url_payload}, headers={"Authorization": f"Bearer {admin_token}"})
     assert r.status_code == 200, r.text
     d = r.json()
     assert d["kind"] == "coupon"
@@ -162,12 +162,12 @@ def test_scan_lookup_url_coupon(api):
     assert d["student_verified"] is True
 
 
-def test_scan_lookup_url_student(api):
+def test_scan_lookup_url_student(api, admin_token):
     sn = STATE["sn"]
     assert sn
     print(f"DEBUG sn={sn!r}", flush=True)
     url_payload = f"{FRONTEND_URL}/scan?s={sn}"
-    r = api.post(f"{BASE_URL}/api/scan/lookup", json={"payload": url_payload})
+    r = api.post(f"{BASE_URL}/api/scan/lookup", json={"payload": url_payload}, headers={"Authorization": f"Bearer {admin_token}"})
     assert r.status_code == 200, r.text
     d = r.json()
     assert d["kind"] == "student"
@@ -175,35 +175,35 @@ def test_scan_lookup_url_student(api):
     assert d["verified"] is True
 
 
-def test_backward_compat_raw_coupon_code(api):
+def test_backward_compat_raw_coupon_code(api, admin_token):
     code = STATE["code"]
-    r = api.post(f"{BASE_URL}/api/scan/lookup", json={"payload": code})
+    r = api.post(f"{BASE_URL}/api/scan/lookup", json={"payload": code}, headers={"Authorization": f"Bearer {admin_token}"})
     assert r.status_code == 200
     assert r.json()["kind"] == "coupon"
 
 
-def test_backward_compat_raw_student_number(api):
+def test_backward_compat_raw_student_number(api, admin_token):
     sn = STATE["sn"]
-    r = api.post(f"{BASE_URL}/api/scan/lookup", json={"payload": sn})
+    r = api.post(f"{BASE_URL}/api/scan/lookup", json={"payload": sn}, headers={"Authorization": f"Bearer {admin_token}"})
     assert r.status_code == 200
     assert r.json()["kind"] == "student"
 
 
-def test_backward_compat_pipe_coupon(api):
+def test_backward_compat_pipe_coupon(api, admin_token):
     # Use the actual coupon; user_id/offer_id can be dummy — parser only inspects delimiter/kind
     code = STATE["code"]
     payload = f"COUPON|{code}|000000000000000000000000|000000000000000000000000"
-    r = api.post(f"{BASE_URL}/api/scan/lookup", json={"payload": payload})
+    r = api.post(f"{BASE_URL}/api/scan/lookup", json={"payload": payload}, headers={"Authorization": f"Bearer {admin_token}"})
     assert r.status_code == 200
     d = r.json()
     assert d["kind"] == "coupon"
     assert d["code"] == code
 
 
-def test_backward_compat_pipe_student(api):
+def test_backward_compat_pipe_student(api, admin_token):
     sn = STATE["sn"]
     payload = f"SCD|{sn}|000000000000000000000000|x@y.z"
-    r = api.post(f"{BASE_URL}/api/scan/lookup", json={"payload": payload})
+    r = api.post(f"{BASE_URL}/api/scan/lookup", json={"payload": payload}, headers={"Authorization": f"Bearer {admin_token}"})
     assert r.status_code == 200
     # For pipe-student, parser sets kind=student. The endpoint may still resolve.
     assert r.json()["kind"] == "student"

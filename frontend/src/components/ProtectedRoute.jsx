@@ -7,7 +7,7 @@ import { useAuth } from "@/context/AuthContext";
  * - Not authed → /login
  * - Authed but email not verified → /verify-email (OTP page)
  */
-export default function ProtectedRoute({ children, requireEmailVerified = true, requireAdmin = false }) {
+export default function ProtectedRoute({ children, requireEmailVerified = true, requireAdmin = false, requirePartner = false }) {
   const { user, ready } = useAuth();
   const location = useLocation();
   if (!ready) {
@@ -19,7 +19,13 @@ export default function ProtectedRoute({ children, requireEmailVerified = true, 
   }
   if (!user) return <Navigate to="/login" state={{ from: location }} replace />;
   if (requireAdmin && user.role !== "admin") {
+    return <Navigate to={user.role === "outlet_partner" ? "/scan" : "/dashboard"} replace />;
+  }
+  if (requirePartner && !["admin", "outlet_partner"].includes(user.role)) {
     return <Navigate to="/dashboard" replace />;
+  }
+  if (!requireAdmin && !requirePartner && user.role === "outlet_partner") {
+    return <Navigate to="/scan" replace />;
   }
   if (requireEmailVerified && user.role === "student" && !user.email_verified) {
     return <Navigate to="/verify-email" state={{ email: user.email }} replace />;

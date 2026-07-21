@@ -9,7 +9,9 @@ export default function Login() {
   const { login } = useAuth();
   const nav = useNavigate();
   const loc = useLocation();
-  const from = loc.state?.from?.pathname || "/dashboard";
+  const requestedFrom = loc.state?.from
+    ? `${loc.state.from.pathname}${loc.state.from.search || ""}`
+    : null;
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -27,7 +29,10 @@ export default function Login() {
       if (r.user && r.user.role === "student" && !r.user.email_verified) {
         nav("/verify-email", { replace: true, state: { email: r.user.email } });
       } else {
-        nav(from, { replace: true });
+        const roleHome = r.user?.role === "admin"
+          ? "/admin"
+          : r.user?.role === "outlet_partner" ? "/scan" : "/dashboard";
+        nav(requestedFrom || roleHome, { replace: true });
       }
     } else {
       setErr(r.error);
@@ -50,7 +55,7 @@ export default function Login() {
           <span className="font-display font-bold text-lg">Savy<span className="text-indigo-400">.</span></span>
         </Link>
         <h1 className="font-display text-3xl md:text-4xl font-extrabold tracking-tight">Welcome back</h1>
-        <p className="text-zinc-400 text-sm mt-2">Log in to claim your student perks.</p>
+        <p className="text-zinc-400 text-sm mt-2">Log in to access student perks or your partner scanner.</p>
 
         <form className="mt-8 space-y-4" onSubmit={onSubmit}>
           <div>

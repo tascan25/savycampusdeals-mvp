@@ -21,6 +21,15 @@ def s():
     return requests.Session()
 
 
+@pytest.fixture(scope="module")
+def scanner_headers(s):
+    r = s.post(f"{API}/auth/login", json={
+        "email": "admin@savycampusdeals.in", "password": "Admin@123",
+    })
+    assert r.status_code == 200, r.text
+    return {"Authorization": f"Bearer {r.json()['token']}"}
+
+
 # ---------- Outlets ----------
 class TestOutlets:
     def test_list_outlets(self, s):
@@ -87,10 +96,10 @@ def _register_verified_student(s):
 
 
 class TestScan:
-    def test_lookup_student_full_payload(self, s):
+    def test_lookup_student_full_payload(self, s, scanner_headers):
         u = _register_verified_student(s)
         payload = f"SCD|{u['student_number']}|{u['user_id']}|{u['email']}"
-        r = s.post(f"{API}/scan/lookup", json={"payload": payload})
+        r = s.post(f"{API}/scan/lookup", json={"payload": payload}, headers=scanner_headers)
         assert r.status_code == 200, r.text
         d = r.json()
         assert d["kind"] == "student"
@@ -98,16 +107,16 @@ class TestScan:
         assert d["student_number"] == u["student_number"]
         assert d["name"] == "Test Student"
 
-    def test_lookup_student_raw_number(self, s):
+    def test_lookup_student_raw_number(self, s, scanner_headers):
         u = _register_verified_student(s)
-        r = s.post(f"{API}/scan/lookup", json={"payload": u["student_number"]})
+        r = s.post(f"{API}/scan/lookup", json={"payload": u["student_number"]}, headers=scanner_headers)
         assert r.status_code == 200, r.text
         d = r.json()
         assert d["kind"] == "student"
         assert d["verified"] is True
         assert d["student_number"] == u["student_number"]
 
-    def test_lookup_coupon_raw_and_prefixed(self, s):
+    def test_lookup_coupon_raw_and_prefixed(self, s, scanner_headers):
         u = _register_verified_student(s)
         # claim a non-outlet offer
         offers = s.get(f"{API}/offers").json()
@@ -117,7 +126,7 @@ class TestScan:
         code = r.json()["code"]
 
         # raw
-        r = s.post(f"{API}/scan/lookup", json={"payload": code})
+        r = s.post(f"{API}/scan/lookup", json={"payload": code}, headers=scanner_headers)
         assert r.status_code == 200
         d = r.json()
         assert d["kind"] == "coupon"
@@ -127,32 +136,32 @@ class TestScan:
 
         # COUPON|... payload
         payload = f"COUPON|{code}|{u['user_id']}|{non_outlet['id']}"
-        r = s.post(f"{API}/scan/lookup", json={"payload": payload})
+        r = s.post(f"{API}/scan/lookup", json={"payload": payload}, headers=scanner_headers)
         assert r.status_code == 200
         assert r.json()["code"] == code
 
-    def test_redeem_then_conflict(self, s):
+    def test_redeem_then_conflict(self, s, scanner_headers):
         u = _register_verified_student(s)
         offers = s.get(f"{API}/offers").json()
         non_outlet = next(o for o in offers if not o.get("outlet_id"))
         code = s.post(f"{API}/offers/{non_outlet['id']}/claim", headers=u["headers"]).json()["code"]
 
-        r = s.post(f"{API}/scan/redeem", json={"payload": code})
+        r = s.post(f"{API}/scan/redeem", json={"payload": code}, headers=scanner_headers)
         assert r.status_code == 200, r.text
         assert r.json()["code"] == code
 
         # verify status via lookup
-        d = s.post(f"{API}/scan/lookup", json={"payload": code}).json()
+        d = s.post(f"{API}/scan/lookup", json={"payload": code}, headers=scanner_headers).json()
         assert d["status"] == "redeemed"
         assert d["redeemed_at"] is not None
 
-        r = s.post(f"{API}/scan/redeem", json={"payload": code})
+        r = s.post(f"{API}/scan/redeem", json={"payload": code}, headers=scanner_headers)
         assert r.status_code == 409
 
 
 # ---------- Outlet gate ----------
 class TestOutletGate:
-    def test_outlet_gate_blocks_same_outlet(self, s):
+    def test_outlet_gate_blocks_same_outlet(self, s, scanner_headers):
         u = _register_verified_student(s)
         # find a Mumbai outlet with >=2 offers (Roastery & Co. has 2)
         outlets = s.get(f"{API}/outlets").json()
@@ -171,7 +180,7 @@ class TestOutletGate:
         code_a = r.json()["code"]
 
         # redeem A via scan
-        r = s.post(f"{API}/scan/redeem", json={"payload": code_a})
+        r = s.post(f"{API}/scan/redeem", json={"payload": code_a}, headers=scanner_headers)
         assert r.status_code == 200
 
         # try to claim B -> should 409
@@ -189,13 +198,13 @@ class TestOutletGate:
         d = s.get(f"{API}/outlets/{target['id']}", headers=u["headers"]).json()
         assert d["already_redeemed_here"] is True
 
-    def test_unrelated_outlet_offer_claimable(self, s):
+    def test_unrelated_outlet_offer_claimable(self, s, scanner_headers):
         u = _register_verified_student(s)
         outlets = s.get(f"{API}/outlets").json()
         # claim from outlet #1
         o1 = s.get(f"{API}/outlets/{outlets[0]['id']}").json()
         code = s.post(f"{API}/offers/{o1['offers'][0]['id']}/claim", headers=u["headers"]).json()["code"]
-        s.post(f"{API}/scan/redeem", json={"payload": code})
+        s.post(f"{API}/scan/redeem", json={"payload": code}, headers=scanner_headers)
         # claim from a DIFFERENT outlet — allowed
         for other in outlets[1:]:
             det = s.get(f"{API}/outlets/{other['id']}").json()

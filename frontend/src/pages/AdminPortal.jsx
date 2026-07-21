@@ -3,8 +3,8 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BarChart3, CheckCircle2, ChevronLeft, ChevronRight, CircleUserRound, Clock3,
-  FileText, LayoutDashboard, Loader2, LogOut, Menu, Search, Settings,
-  ShieldCheck, Store, Ticket, Users, XCircle,
+  FileText, Handshake, LayoutDashboard, Loader2, LogOut, Menu, Search, Settings,
+  ShieldCheck, Store, Ticket, TicketCheck, Users, XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import api, { formatApiError } from "@/lib/api";
@@ -12,11 +12,15 @@ import { useAuth } from "@/context/AuthContext";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
+import AdminPartnersPage from "@/pages/admin/AdminPartnersPage";
+import AdminRedemptionsPage from "@/pages/admin/AdminRedemptionsPage";
 
 const navItems = [
   { to: "/admin", label: "Dashboard", icon: LayoutDashboard },
   { to: "/admin/users", label: "Users", icon: Users },
   { to: "/admin/pending-verifications", label: "Pending verification", icon: ShieldCheck },
+  { to: "/admin/partners", label: "Outlet partners", icon: Handshake },
+  { to: "/admin/redemptions", label: "Redemptions", icon: TicketCheck },
   { to: "/admin/brands", label: "Brands", icon: Store, placeholder: true },
   { to: "/admin/coupons", label: "Coupons", icon: Ticket, placeholder: true },
   { to: "/admin/analytics", label: "Analytics", icon: BarChart3, placeholder: true },
@@ -98,6 +102,7 @@ function DashboardPage() {
     ["total_users", "Total users", Users, "text-indigo-300"], ["verified_students", "Verified students", CheckCircle2, "text-emerald-300"],
     ["pending_verifications", "Pending requests", Clock3, "text-amber-300"], ["rejected_verifications", "Rejected verifications", XCircle, "text-rose-300"],
     ["today_signups", "Today's signups", CircleUserRound, "text-sky-300"], ["total_brands", "Total brands", Store, "text-violet-300"],
+    ["outlet_partners", "Active outlet partners", Handshake, "text-cyan-300"], ["outlet_redemptions", "Outlet redemptions", TicketCheck, "text-emerald-300"],
   ];
   return <><div><p className="text-xs uppercase tracking-[0.25em] text-indigo-300">Administration</p><h1 className="font-display mt-2 text-3xl font-extrabold">Dashboard</h1><p className="mt-2 text-sm text-zinc-400">A live overview of SavyCampusDeals.</p></div>
     <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -164,6 +169,8 @@ export default function AdminPortal() {
   let page = <DashboardPage />;
   if (pathname.startsWith("/admin/users")) page = <UsersPage openUser={openUser} />;
   else if (pathname.startsWith("/admin/pending-verifications")) page = <PendingPage openUser={(id) => openUser(id)} review={(request) => openUser(request.user_id, request.id)} />;
+  else if (pathname.startsWith("/admin/partners")) page = <AdminPartnersPage />;
+  else if (pathname.startsWith("/admin/redemptions")) page = <AdminRedemptionsPage />;
   else { const item = navItems.find((entry) => entry.placeholder && pathname.startsWith(entry.to)); if (item) page = <PlaceholderPage title={item.label} />; }
   return <div className="min-h-screen bg-[#050505] text-white md:flex"><AdminSidebar pathname={pathname} mobileOpen={mobileOpen} onNavigate={() => setMobileOpen(false)} /><main className="min-w-0 flex-1"><div className="border-b border-white/10 px-5 py-4 md:hidden"><button onClick={() => setMobileOpen(!mobileOpen)} className="inline-flex items-center gap-2 text-sm text-zinc-300"><Menu size={18} /> Menu</button></div><div className="mx-auto max-w-7xl p-5 md:p-9">{page}</div></main><UserDialog userId={userId} onClose={() => setUserId(null)} selectedVerification={selectedVerification} onReview={review} /><ReviewDialog action={reviewAction} onClose={() => { setReviewAction(null); setUserId(null); }} /></div>;
 }

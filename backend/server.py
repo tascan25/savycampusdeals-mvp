@@ -130,6 +130,8 @@ def serialize_user(u: dict) -> dict:
         "verification_expiry": u.get("verification_expiry"),
         "reward_points": u.get("reward_points", 0),
         "referral_code": u.get("referral_code", ""),
+        "outlet_id": str(u["outlet_id"]) if u.get("outlet_id") else None,
+        "active": u.get("active", True),
         "created_at": u.get("created_at").isoformat() if u.get("created_at") else None,
     }
 
@@ -151,6 +153,8 @@ async def get_current_user(request: Request) -> dict:
     user = await db.users.find_one({"_id": ObjectId(payload["sub"])})
     if not user:
         raise HTTPException(401, "User not found")
+    if user.get("role") == "outlet_partner" and not user.get("active", True):
+        raise HTTPException(403, "This outlet partner account is disabled")
     return user
 
 
@@ -368,6 +372,17 @@ class VerificationReviewIn(BaseModel):
 class AdminVerificationDecisionIn(BaseModel):
     verification_id: str = Field(min_length=24, max_length=24)
     rejection_reason: Optional[str] = Field(default="", max_length=1000)
+
+
+class AdminPartnerCreateIn(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
+    outlet_id: str = Field(min_length=24, max_length=24)
+
+
+class AdminPartnerStatusIn(BaseModel):
+    active: bool
 
 
 class OtpVerifyIn(BaseModel):
@@ -844,6 +859,138 @@ async def get_admin_user(request: Request) -> dict:
     return user
 
 
+async def get_scanner_user(request: Request) -> dict:
+    user = await get_current_user(request)
+    if user.get("role") not in {"admin", "outlet_partner"}:
+        raise HTTPException(403, "Outlet partner access required")
+    if user.get("role") == "outlet_partner" and not user.get("outlet_id"):
+        raise HTTPException(403, "This partner account is not assigned to an outlet")
+    if user.get("role") == "outlet_partner" and not await db.outlets.find_one(
+        {"_id": user["outlet_id"]}, {"_id": 1}
+    ):
+        raise HTTPException(403, "The assigned outlet is no longer available")
+    return user
+
+
+def ensure_scanner_coupon_access(scanner: dict, coupon: dict) -> None:
+    """Prevent an outlet partner from inspecting or redeeming another outlet's QR."""
+    if scanner.get("role") == "admin":
+        return
+    coupon_outlet_id = coupon.get("outlet_id")
+    if not coupon_outlet_id:
+        raise HTTPException(403, "This coupon is not assigned to an outlet")
+    if coupon_outlet_id != scanner.get("outlet_id"):
+        raise HTTPException(403, "This coupon belongs to another outlet")
+
+
+@api.get("/partner/profile")
+async def partner_profile(scanner=Depends(get_scanner_user)):
+    outlet = None
+    if scanner.get("outlet_id"):
+        outlet = await db.outlets.find_one({"_id": scanner["outlet_id"]})
+    return {
+        "name": scanner.get("name", ""),
+        "email": scanner.get("email", ""),
+        "role": scanner.get("role", ""),
+        "outlet": serialize_outlet(outlet) if outlet else None,
+    }
+
+
+def serialize_admin_partner(partner: Optional[dict]) -> Optional[dict]:
+    if not partner:
+        return None
+    return {
+        "id": str(partner["_id"]),
+        "name": partner.get("name", ""),
+        "email": partner.get("email", ""),
+        "active": partner.get("active", True),
+        "created_at": _admin_datetime(partner.get("created_at")),
+    }
+
+
+@api.get("/admin/partners")
+async def admin_partners(admin=Depends(get_admin_user)):
+    outlets = await db.outlets.find({}).sort("name", 1).to_list(500)
+    partners = await db.users.find({"role": "outlet_partner"}).to_list(500)
+    partner_by_outlet = {
+        partner.get("outlet_id"): partner
+        for partner in partners
+        if partner.get("outlet_id")
+    }
+    return {
+        "items": [
+            {
+                "outlet": serialize_outlet(outlet),
+                "partner": serialize_admin_partner(partner_by_outlet.get(outlet["_id"])),
+            }
+            for outlet in outlets
+        ]
+    }
+
+
+@api.post("/admin/partners")
+async def admin_create_partner(
+    body: AdminPartnerCreateIn, admin=Depends(get_admin_user)
+):
+    validate_password(body.password)
+    try:
+        outlet_oid = ObjectId(body.outlet_id)
+    except Exception:
+        raise HTTPException(404, "Outlet not found")
+    outlet = await db.outlets.find_one({"_id": outlet_oid})
+    if not outlet:
+        raise HTTPException(404, "Outlet not found")
+    if await db.users.find_one({"role": "outlet_partner", "outlet_id": outlet_oid}):
+        raise HTTPException(409, "This outlet already has a partner account")
+    email = body.email.lower().strip()
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(409, "Email already registered")
+    now = datetime.now(timezone.utc)
+    partner = {
+        "email": email,
+        "password_hash": hash_password(body.password),
+        "name": body.name.strip(),
+        "role": "outlet_partner",
+        "outlet_id": outlet_oid,
+        "active": True,
+        "email_verified": True,
+        "verification_status": "approved",
+        "reward_points": 0,
+        "referral_code": "",
+        "created_by": admin["_id"],
+        "created_at": now,
+    }
+    try:
+        result = await db.users.insert_one(partner)
+    except DuplicateKeyError:
+        raise HTTPException(409, "The email or outlet already has a partner account")
+    partner["_id"] = result.inserted_id
+    return {
+        "outlet": serialize_outlet(outlet),
+        "partner": serialize_admin_partner(partner),
+    }
+
+
+@api.patch("/admin/partners/{partner_id}/status")
+async def admin_set_partner_status(
+    partner_id: str,
+    body: AdminPartnerStatusIn,
+    admin=Depends(get_admin_user),
+):
+    try:
+        partner_oid = ObjectId(partner_id)
+    except Exception:
+        raise HTTPException(404, "Partner account not found")
+    result = await db.users.update_one(
+        {"_id": partner_oid, "role": "outlet_partner"},
+        {"$set": {"active": body.active, "updated_at": datetime.now(timezone.utc)}},
+    )
+    if not result.matched_count:
+        raise HTTPException(404, "Partner account not found")
+    partner = await db.users.find_one({"_id": partner_oid})
+    return {"partner": serialize_admin_partner(partner)}
+
+
 @api.get("/admin/verifications")
 async def list_verifications(status: Optional[str] = None, admin=Depends(get_admin_user)):
     query = {"status": status} if status else {}
@@ -1075,14 +1222,16 @@ async def _review_pending_verification(
 async def admin_dashboard(admin=Depends(get_admin_user)):
     """Summary data for the admin home. Counts use the source collections only."""
     today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    student_query = {"role": {"$ne": "admin"}}
-    total_users, verified_students, pending, rejected, today_signups, brands = await asyncio.gather(
+    student_query = {"role": "student"}
+    total_users, verified_students, pending, rejected, today_signups, brands, partners, redeemed = await asyncio.gather(
         db.users.count_documents(student_query),
         db.users.count_documents({**student_query, "verification_status": "approved"}),
         db.verifications.count_documents({"status": "pending"}),
         db.verifications.count_documents({"status": "rejected"}),
         db.users.count_documents({**student_query, "created_at": {"$gte": today}}),
         db.offers.distinct("brand"),
+        db.users.count_documents({"role": "outlet_partner", "active": {"$ne": False}}),
+        db.coupons.count_documents({"outlet_id": {"$ne": None}, "status": "redeemed"}),
     )
     return {
         "total_users": total_users,
@@ -1091,6 +1240,8 @@ async def admin_dashboard(admin=Depends(get_admin_user)):
         "rejected_verifications": rejected,
         "today_signups": today_signups,
         "total_brands": len(brands),
+        "outlet_partners": partners,
+        "outlet_redemptions": redeemed,
     }
 
 
@@ -1104,7 +1255,7 @@ async def admin_users(
 ):
     if status and status not in {"approved", "pending", "rejected", "not_submitted"}:
         raise HTTPException(400, "Invalid verification status")
-    query: dict = {"role": {"$ne": "admin"}}
+    query: dict = {"role": "student"}
     if status:
         query["verification_status"] = status
     if q and q.strip():
@@ -1128,7 +1279,7 @@ async def admin_pending_verifications(
 ):
     query = {"status": "pending"}
     total = await db.users.count_documents(
-        {"role": {"$ne": "admin"}, "verification_status": "pending"}
+        {"role": "student", "verification_status": "pending"}
     )
     cursor = db.verifications.find(query).sort("submitted_at", -1).skip((page - 1) * page_size).limit(page_size)
     docs = [doc async for doc in cursor]
@@ -1155,7 +1306,7 @@ async def admin_user_detail(user_id: str, admin=Depends(get_admin_user)):
         user_oid = ObjectId(user_id)
     except Exception:
         raise HTTPException(404, "User not found")
-    user = await db.users.find_one({"_id": user_oid, "role": {"$ne": "admin"}})
+    user = await db.users.find_one({"_id": user_oid, "role": "student"})
     if not user:
         raise HTTPException(404, "User not found")
     verification_docs = await db.verifications.find({"user_id": user_oid}).sort("submitted_at", -1).to_list(25)
@@ -1180,6 +1331,202 @@ async def admin_reject_verification(
     if not reason:
         raise HTTPException(400, "A rejection reason is required")
     return await _review_pending_verification(body.verification_id, "rejected", reason, admin)
+
+
+def _admin_report_date_range(
+    date_from: Optional[str], date_to: Optional[str]
+) -> tuple[Optional[datetime], Optional[datetime]]:
+    try:
+        start = (
+            datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=INDIA_TIMEZONE)
+            if date_from
+            else None
+        )
+        end = (
+            datetime.strptime(date_to, "%Y-%m-%d").replace(tzinfo=INDIA_TIMEZONE)
+            + timedelta(days=1)
+            if date_to
+            else None
+        )
+    except ValueError:
+        raise HTTPException(400, "Dates must use YYYY-MM-DD format")
+    if start and end and end <= start:
+        raise HTTPException(400, "End date must be on or after start date")
+    return (
+        start.astimezone(timezone.utc) if start else None,
+        end.astimezone(timezone.utc) if end else None,
+    )
+
+
+def _with_date_range(
+    query: dict, field: str, start: Optional[datetime], end: Optional[datetime]
+) -> dict:
+    if start or end:
+        bounds = {}
+        if start:
+            bounds["$gte"] = start
+        if end:
+            bounds["$lt"] = end
+        query[field] = bounds
+    return query
+
+
+async def _coupon_counts_by_outlet(query: dict) -> dict:
+    rows = await db.coupons.aggregate(
+        [
+            {"$match": query},
+            {"$group": {"_id": "$outlet_id", "count": {"$sum": 1}}},
+        ]
+    ).to_list(1000)
+    return {row["_id"]: row["count"] for row in rows if row.get("_id")}
+
+
+@api.get("/admin/outlet-redemptions")
+async def admin_outlet_redemptions(
+    outlet_id: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    admin=Depends(get_admin_user),
+):
+    if status and status not in {"active", "redeemed", "expired"}:
+        raise HTTPException(400, "Invalid coupon status")
+    selected_outlet_oid = None
+    if outlet_id:
+        try:
+            selected_outlet_oid = ObjectId(outlet_id)
+        except Exception:
+            raise HTTPException(404, "Outlet not found")
+        if not await db.outlets.find_one({"_id": selected_outlet_oid}, {"_id": 1}):
+            raise HTTPException(404, "Outlet not found")
+
+    start, end = _admin_report_date_range(date_from, date_to)
+    outlets = await db.outlets.find({}).sort("name", 1).to_list(1000)
+    outlet_by_id = {outlet["_id"]: outlet for outlet in outlets}
+
+    base = {"outlet_id": {"$ne": None}}
+    issued_query = _with_date_range({**base}, "created_at", start, end)
+    active_query = _with_date_range(
+        {**base, "status": "active"}, "created_at", start, end
+    )
+    expired_query = _with_date_range(
+        {**base, "status": "expired"}, "created_at", start, end
+    )
+    redeemed_query = _with_date_range(
+        {**base, "status": "redeemed"}, "redeemed_at", start, end
+    )
+    issued_counts, active_counts, expired_counts, redeemed_counts = await asyncio.gather(
+        _coupon_counts_by_outlet(issued_query),
+        _coupon_counts_by_outlet(active_query),
+        _coupon_counts_by_outlet(expired_query),
+        _coupon_counts_by_outlet(redeemed_query),
+    )
+    summary = [
+        {
+            "outlet_id": str(outlet["_id"]),
+            "outlet_name": outlet.get("name", ""),
+            "city": outlet.get("city", ""),
+            "issued": issued_counts.get(outlet["_id"], 0),
+            "active": active_counts.get(outlet["_id"], 0),
+            "redeemed": redeemed_counts.get(outlet["_id"], 0),
+            "expired": expired_counts.get(outlet["_id"], 0),
+        }
+        for outlet in outlets
+    ]
+    if selected_outlet_oid:
+        summary = [
+            row for row in summary if row["outlet_id"] == str(selected_outlet_oid)
+        ]
+
+    detail_query: dict = {**base}
+    if selected_outlet_oid:
+        detail_query["outlet_id"] = selected_outlet_oid
+    if status:
+        detail_query["status"] = status
+    if start or end:
+        if status == "redeemed":
+            _with_date_range(detail_query, "redeemed_at", start, end)
+        elif status in {"active", "expired"}:
+            _with_date_range(detail_query, "created_at", start, end)
+        else:
+            created_bounds = {}
+            redeemed_bounds = {}
+            if start:
+                created_bounds["$gte"] = start
+                redeemed_bounds["$gte"] = start
+            if end:
+                created_bounds["$lt"] = end
+                redeemed_bounds["$lt"] = end
+            detail_query["$or"] = [
+                {"status": "redeemed", "redeemed_at": redeemed_bounds},
+                {"status": {"$ne": "redeemed"}, "created_at": created_bounds},
+            ]
+
+    total = await db.coupons.count_documents(detail_query)
+    coupons = await (
+        db.coupons.find(detail_query)
+        .sort([("redeemed_at", -1), ("created_at", -1)])
+        .skip((page - 1) * page_size)
+        .limit(page_size)
+        .to_list(page_size)
+    )
+    student_ids = {coupon.get("user_id") for coupon in coupons if coupon.get("user_id")}
+    offer_ids = {coupon.get("offer_id") for coupon in coupons if coupon.get("offer_id")}
+    approver_ids = {
+        coupon.get("approved_by_user_id") or coupon.get("redeemed_by_user_id")
+        for coupon in coupons
+        if coupon.get("approved_by_user_id") or coupon.get("redeemed_by_user_id")
+    }
+    students, offers, approvers = await asyncio.gather(
+        db.users.find({"_id": {"$in": list(student_ids)}}).to_list(len(student_ids) or 1),
+        db.offers.find({"_id": {"$in": list(offer_ids)}}).to_list(len(offer_ids) or 1),
+        db.users.find({"_id": {"$in": list(approver_ids)}}).to_list(len(approver_ids) or 1),
+    )
+    student_by_id = {student["_id"]: student for student in students}
+    offer_by_id = {offer["_id"]: offer for offer in offers}
+    approver_by_id = {approver["_id"]: approver for approver in approvers}
+    items = []
+    for coupon in coupons:
+        student = student_by_id.get(coupon.get("user_id"), {})
+        offer = offer_by_id.get(coupon.get("offer_id"), {})
+        outlet = outlet_by_id.get(coupon.get("outlet_id"), {})
+        approver_id = coupon.get("approved_by_user_id") or coupon.get("redeemed_by_user_id")
+        approver = approver_by_id.get(approver_id, {})
+        items.append(
+            {
+                "id": str(coupon["_id"]),
+                "code": coupon.get("code", ""),
+                "status": coupon.get("status", ""),
+                "student_name": student.get("name", ""),
+                "student_number": student.get("student_number", ""),
+                "student_email": student.get("email", ""),
+                "offer_title": offer.get("title", ""),
+                "discount": offer.get("discount", ""),
+                "outlet_id": str(coupon.get("outlet_id")) if coupon.get("outlet_id") else None,
+                "outlet_name": outlet.get("name", ""),
+                "claimed_at": _admin_datetime(coupon.get("created_at")),
+                "approved_at": _admin_datetime(
+                    coupon.get("approved_at") or coupon.get("redeemed_at")
+                ),
+                "redeemed_at": _admin_datetime(coupon.get("redeemed_at")),
+                "approved_by_name": approver.get("name", "Legacy scanner"),
+                "approved_by_email": approver.get("email", ""),
+                "legacy_approval": not bool(approver),
+            }
+        )
+    return {
+        "summary": summary,
+        "items": items,
+        "outlets": [
+            {"id": str(outlet["_id"]), "name": outlet.get("name", ""), "city": outlet.get("city", "")}
+            for outlet in outlets
+        ],
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+    }
 
 
 @api.get("/verification/status")
@@ -1851,8 +2198,8 @@ def _parse_qr_payload(raw: str) -> dict:
 
 
 @api.post("/scan/lookup")
-async def scan_lookup(body: ScanIn):
-    """Public endpoint used by restaurant staff. Parses QR + returns student/coupon info."""
+async def scan_lookup(body: ScanIn, scanner=Depends(get_scanner_user)):
+    """Authenticated restaurant scanner lookup for student and coupon QRs."""
     parsed = _parse_qr_payload(body.payload)
 
     if parsed["kind"] == "student":
@@ -1887,6 +2234,7 @@ async def scan_lookup(body: ScanIn):
             c = await db.coupons.find_one({"code": parsed["code"]})
         if not c:
             raise HTTPException(404, "Coupon not found")
+        ensure_scanner_coupon_access(scanner, c)
         offer = await db.offers.find_one({"_id": c["offer_id"]})
         user = await db.users.find_one({"_id": c["user_id"]})
         student_expiry = (user or {}).get("verification_expiry")
@@ -1928,7 +2276,7 @@ async def scan_lookup(body: ScanIn):
 
 
 @api.post("/scan/redeem")
-async def scan_redeem(body: ScanIn):
+async def scan_redeem(body: ScanIn, scanner=Depends(get_scanner_user)):
     """Restaurant marks a coupon as redeemed."""
     parsed = _parse_qr_payload(body.payload)
     if parsed["kind"] != "coupon":
@@ -1939,6 +2287,7 @@ async def scan_redeem(body: ScanIn):
     c = await db.coupons.find_one({"code": code})
     if not c:
         raise HTTPException(404, "Coupon not found")
+    ensure_scanner_coupon_access(scanner, c)
     if c["status"] == "redeemed":
         raise HTTPException(409, "Coupon already redeemed")
     if c.get("expires_at") and _aware(c["expires_at"]) < datetime.now(timezone.utc):
@@ -2028,7 +2377,16 @@ async def scan_redeem(body: ScanIn):
 
     redeemed = await db.coupons.update_one(
         {"_id": c["_id"], "status": "active"},
-        {"$set": {"status": "redeemed", "redeemed_at": now}},
+        {
+            "$set": {
+                "status": "redeemed",
+                "redeemed_at": now,
+                "approved_at": now,
+                "redeemed_outlet_id": c.get("outlet_id"),
+                "redeemed_by_user_id": scanner["_id"],
+                "approved_by_user_id": scanner["_id"],
+            }
+        },
     )
     if not redeemed.matched_count:
         raise HTTPException(409, "Coupon already redeemed")
@@ -2041,6 +2399,8 @@ async def scan_redeem(body: ScanIn):
         "brand": (offer or {}).get("brand", ""),
         "student_name": user.get("name", ""),
         "student_number": user.get("student_number", ""),
+        "approved_by": scanner.get("name", ""),
+        "outlet_id": str(c.get("outlet_id")) if c.get("outlet_id") else None,
     }
 
 
@@ -2539,7 +2899,15 @@ async def on_startup():
             [("user_id", 1), ("offer_id", 1)], unique=True
         )
         await db.coupons.create_index([("user_id", 1), ("offer_id", 1), ("status", 1)])
+        await db.coupons.create_index(
+            [("outlet_id", 1), ("status", 1), ("redeemed_at", -1)]
+        )
         await db.users.create_index([("verification_status", 1), ("created_at", -1)])
+        await db.users.create_index(
+            [("outlet_id", 1)],
+            unique=True,
+            partialFilterExpression={"role": "outlet_partner"},
+        )
         await db.verifications.create_index([("status", 1), ("submitted_at", -1)])
         await db.outlet_daily_redemptions.create_index(
             [("user_id", 1), ("outlet_id", 1), ("day", 1)], unique=True
