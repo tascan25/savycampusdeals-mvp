@@ -81,7 +81,7 @@ export default function OutletDetail() {
 
             {outlet.already_redeemed_here && (
               <div className="rounded-2xl border border-amber-400/30 bg-amber-500/10 text-amber-100 text-sm p-4 mb-4" data-testid="outlet-gate-notice">
-                <ShieldCheck className="inline mr-1" size={14} /> You've already redeemed a deal here. You can claim a fresh one once this outlet posts a newer deal.
+                <ShieldCheck className="inline mr-1" size={14} /> {outlet.claim_message || "You've already redeemed a deal here. You can claim a fresh one once this outlet posts a newer deal."}
               </div>
             )}
 

@@ -15,6 +15,7 @@ import html
 import re
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Any
+from zoneinfo import ZoneInfo
 
 import bcrypt
 import jwt
@@ -49,6 +50,7 @@ MONGO_URL = os.environ["MONGO_URL"]
 DB_NAME = os.environ["DB_NAME"]
 JWT_SECRET = os.environ["JWT_SECRET"]
 JWT_ALGO = "HS256"
+INDIA_TIMEZONE = ZoneInfo("Asia/Kolkata")
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 FROM_EMAIL = os.environ.get("FROM_EMAIL", "onboarding@resend.dev")
@@ -179,6 +181,26 @@ def _aware(dt):
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt
+
+
+def is_daily_outlet_offer(offer: dict) -> bool:
+    """Whether an outlet offer permits one redeemed deal per calendar day."""
+    policy = offer.get("redemption_policy", "").lower()
+    if policy == "daily":
+        return True
+    # Existing partner offers predate the explicit policy field. Preserve their
+    # stated once-per-day terms until they are next imported with the field.
+    return "once per student per day" in offer.get("terms", "").lower()
+
+
+def india_day_bounds(now: Optional[datetime] = None) -> tuple[datetime, datetime]:
+    """UTC bounds for the current calendar day in the partners' local timezone."""
+    local_now = (now or datetime.now(timezone.utc)).astimezone(INDIA_TIMEZONE)
+    local_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return (
+        local_start.astimezone(timezone.utc),
+        (local_start + timedelta(days=1)).astimezone(timezone.utc),
+    )
 
 
 DEV_OTP_FALLBACK = os.environ.get("DEV_OTP_FALLBACK", "true").lower() == "true"
@@ -1211,6 +1233,7 @@ def serialize_offer(o: dict, saved_ids: set = None) -> dict:
         "claims_count": o.get("claims_count", 0),
         "saved": str(o["_id"]) in saved_ids,
         "outlet_id": str(outlet_id) if outlet_id else None,
+        "redemption_policy": o.get("redemption_policy", ""),
         "created_at": o.get("created_at").isoformat() if o.get("created_at") else None,
     }
 
@@ -1367,33 +1390,57 @@ async def claim_offer(offer_id: str, user=Depends(get_verified_user)):
     if not offer:
         raise HTTPException(404, "Offer not found")
 
-    # prevent duplicate active coupon for same offer
+    now = datetime.now(timezone.utc)
+
+    # Prevent duplicate active coupons for the same offer. An expiry is also
+    # applied here so an unscanned, stale coupon cannot block a fresh claim.
     existing = await db.coupons.find_one(
         {"user_id": user["_id"], "offer_id": oid, "status": "active"}
     )
     if existing:
-        return serialize_coupon(existing, offer)
+        if existing.get("expires_at") and _aware(existing["expires_at"]) < now:
+            await db.coupons.update_one(
+                {"_id": existing["_id"], "status": "active"},
+                {"$set": {"status": "expired"}},
+            )
+        else:
+            return serialize_coupon(existing, offer)
 
-    # OUTLET GATE: if offer belongs to an outlet, ensure user has NOT already redeemed
-    # a newer-or-same-vintage deal at this outlet.
+    # Outlet policy: daily partner offers reset at midnight India time. Other
+    # outlet offers retain the existing "newer deal required" behaviour.
     outlet_oid = offer.get("outlet_id")
     if outlet_oid:
-        last_redeemed = await db.coupons.find_one(
-            {"user_id": user["_id"], "outlet_id": outlet_oid, "status": "redeemed"},
-            sort=[("redeemed_at", -1)],
-        )
-        if last_redeemed:
-            last_offer = await db.offers.find_one({"_id": last_redeemed["offer_id"]})
-            last_created = last_offer.get("created_at") if last_offer else None
-            this_created = offer.get("created_at")
-            if last_created and this_created and this_created <= last_created:
+        if is_daily_outlet_offer(offer):
+            day_start, day_end = india_day_bounds(now)
+            redeemed_today = await db.coupons.find_one(
+                {
+                    "user_id": user["_id"],
+                    "outlet_id": outlet_oid,
+                    "status": "redeemed",
+                    "redeemed_at": {"$gte": day_start, "$lt": day_end},
+                }
+            )
+            if redeemed_today:
                 raise HTTPException(
                     409,
-                    "You've already redeemed a deal at this outlet. Wait for a new deal to be posted here.",
+                    "You've already redeemed today's deal at this outlet. Please come back tomorrow.",
                 )
+        else:
+            last_redeemed = await db.coupons.find_one(
+                {"user_id": user["_id"], "outlet_id": outlet_oid, "status": "redeemed"},
+                sort=[("redeemed_at", -1)],
+            )
+            if last_redeemed:
+                last_offer = await db.offers.find_one({"_id": last_redeemed["offer_id"]})
+                last_created = last_offer.get("created_at") if last_offer else None
+                this_created = offer.get("created_at")
+                if last_created and this_created and this_created <= last_created:
+                    raise HTTPException(
+                        409,
+                        "You've already redeemed a deal at this outlet. Wait for a new deal to be posted here.",
+                    )
 
     code = f"SCD-{secrets.token_hex(4).upper()}"
-    now = datetime.now(timezone.utc)
     expires = now + timedelta(days=30)
     # Encode as a URL so any phone camera opens the /scan page directly.
     payload = f"{FRONTEND_URL}/scan?c={code}"
@@ -1618,16 +1665,35 @@ async def get_outlet(outlet_id: str, request: Request):
 
     saved_ids: set = set()
     already_redeemed_outlet = False
+    outlet_claim_message = ""
     try:
         user = await get_current_user(request)
         saved = await db.saved_offers.find({"user_id": user["_id"]}).to_list(500)
         saved_ids = {str(s["offer_id"]) for s in saved}
-        # gate info
-        already_redeemed_outlet = bool(
-            await db.coupons.find_one(
-                {"user_id": user["_id"], "outlet_id": oid, "status": "redeemed"}
+        if any(is_daily_outlet_offer(offer) for offer in offers):
+            day_start, day_end = india_day_bounds()
+            already_redeemed_outlet = bool(
+                await db.coupons.find_one(
+                    {
+                        "user_id": user["_id"],
+                        "outlet_id": oid,
+                        "status": "redeemed",
+                        "redeemed_at": {"$gte": day_start, "$lt": day_end},
+                    }
+                )
             )
-        )
+            outlet_claim_message = (
+                "You've already redeemed today's deal here. Please come back tomorrow."
+            )
+        else:
+            already_redeemed_outlet = bool(
+                await db.coupons.find_one(
+                    {"user_id": user["_id"], "outlet_id": oid, "status": "redeemed"}
+                )
+            )
+            outlet_claim_message = (
+                "You've already redeemed a deal here. You can claim a fresh one once this outlet posts a newer deal."
+            )
     except Exception:
         pass
 
@@ -1635,6 +1701,7 @@ async def get_outlet(outlet_id: str, request: Request):
         **serialize_outlet(outlet, len(offers)),
         "offers": [serialize_offer(o, saved_ids) for o in offers],
         "already_redeemed_here": already_redeemed_outlet,
+        "claim_message": outlet_claim_message,
     }
 
 
@@ -1796,10 +1863,39 @@ async def scan_redeem(body: ScanIn):
         raise HTTPException(403, "Student not verified")
 
     now = datetime.now(timezone.utc)
-    await db.coupons.update_one(
-        {"_id": c["_id"]}, {"$set": {"status": "redeemed", "redeemed_at": now}}
-    )
     offer = await db.offers.find_one({"_id": c["offer_id"]})
+    if c.get("outlet_id") and offer and is_daily_outlet_offer(offer):
+        day_start, day_end = india_day_bounds(now)
+        already_redeemed = await db.coupons.find_one(
+            {
+                "user_id": c["user_id"],
+                "outlet_id": c["outlet_id"],
+                "status": "redeemed",
+                "redeemed_at": {"$gte": day_start, "$lt": day_end},
+                "_id": {"$ne": c["_id"]},
+            }
+        )
+        if already_redeemed:
+            raise HTTPException(409, "This student has already redeemed today's deal at this outlet.")
+        try:
+            await db.outlet_daily_redemptions.insert_one(
+                {
+                    "user_id": c["user_id"],
+                    "outlet_id": c["outlet_id"],
+                    "day": day_start,
+                    "coupon_id": c["_id"],
+                    "created_at": now,
+                }
+            )
+        except DuplicateKeyError:
+            raise HTTPException(409, "This student has already redeemed today's deal at this outlet.")
+
+    redeemed = await db.coupons.update_one(
+        {"_id": c["_id"], "status": "active"},
+        {"$set": {"status": "redeemed", "redeemed_at": now}},
+    )
+    if not redeemed.matched_count:
+        raise HTTPException(409, "Coupon already redeemed")
     return {
         "ok": True,
         "code": c["code"],
@@ -2262,6 +2358,7 @@ async def seed_outlets():
                     "discount": o["discount"],
                     "image_url": od.get("cover_url", od.get("image_url", "")),
                     "terms": o.get("terms", ""),
+                    "redemption_policy": o.get("redemption_policy", ""),
                     "validity": o.get("validity", "Ongoing"),
                     "featured": o.get("featured", False),
                     "trending": o.get("trending", False),
@@ -2308,6 +2405,9 @@ async def on_startup():
         await db.coupons.create_index([("user_id", 1), ("offer_id", 1), ("status", 1)])
         await db.users.create_index([("verification_status", 1), ("created_at", -1)])
         await db.verifications.create_index([("status", 1), ("submitted_at", -1)])
+        await db.outlet_daily_redemptions.create_index(
+            [("user_id", 1), ("outlet_id", 1), ("day", 1)], unique=True
+        )
         await db.verifications.create_index(
             "student_id_normalized",
             unique=True,

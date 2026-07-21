@@ -25,6 +25,7 @@
         "discount": "10% OFF",
         "description": "Verified students get 10% OFF on eligible orders above ₹399.",
         "terms": "Valid once per student per day. Minimum order ₹399. Selected menu items are excluded.",
+        "redemption_policy": "daily",
         "validity": "Ongoing",
         "featured": true,
         "trending": true
@@ -57,6 +58,7 @@
         "discount": "10% OFF",
         "description": "Verified students enjoy 10% OFF on the entire menu.",
         "terms": "Valid once per student per day. Minimum order ₹99. Applicable all days of the week.",
+        "redemption_policy": "daily",
         "validity": "Ongoing",
         "featured": true,
         "trending": true
