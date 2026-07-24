@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -15,6 +15,8 @@ import {
 import AdminPartnersPage from "@/pages/admin/AdminPartnersPage";
 import AdminRedemptionsPage from "@/pages/admin/AdminRedemptionsPage";
 
+const AdminAnalyticsPage = lazy(() => import("@/pages/admin/AdminAnalyticsPage"));
+
 const navItems = [
   { to: "/admin", label: "Dashboard", icon: LayoutDashboard },
   { to: "/admin/users", label: "Users", icon: Users },
@@ -23,7 +25,7 @@ const navItems = [
   { to: "/admin/redemptions", label: "Redemptions", icon: TicketCheck },
   { to: "/admin/brands", label: "Brands", icon: Store, placeholder: true },
   { to: "/admin/coupons", label: "Coupons", icon: Ticket, placeholder: true },
-  { to: "/admin/analytics", label: "Analytics", icon: BarChart3, placeholder: true },
+  { to: "/admin/analytics", label: "Analytics", icon: BarChart3 },
   { to: "/admin/settings", label: "Settings", icon: Settings, placeholder: true },
 ];
 
@@ -171,6 +173,7 @@ export default function AdminPortal() {
   else if (pathname.startsWith("/admin/pending-verifications")) page = <PendingPage openUser={(id) => openUser(id)} review={(request) => openUser(request.user_id, request.id)} />;
   else if (pathname.startsWith("/admin/partners")) page = <AdminPartnersPage />;
   else if (pathname.startsWith("/admin/redemptions")) page = <AdminRedemptionsPage />;
+  else if (pathname.startsWith("/admin/analytics")) page = <Suspense fallback={<div className="min-h-[420px] grid place-items-center"><Loader2 className="animate-spin text-indigo-300" /></div>}><AdminAnalyticsPage /></Suspense>;
   else { const item = navItems.find((entry) => entry.placeholder && pathname.startsWith(entry.to)); if (item) page = <PlaceholderPage title={item.label} />; }
   return <div className="min-h-screen bg-[#050505] text-white md:flex"><AdminSidebar pathname={pathname} mobileOpen={mobileOpen} onNavigate={() => setMobileOpen(false)} /><main className="min-w-0 flex-1"><div className="border-b border-white/10 px-5 py-4 md:hidden"><button onClick={() => setMobileOpen(!mobileOpen)} className="inline-flex items-center gap-2 text-sm text-zinc-300"><Menu size={18} /> Menu</button></div><div className="mx-auto max-w-7xl p-5 md:p-9">{page}</div></main><UserDialog userId={userId} onClose={() => setUserId(null)} selectedVerification={selectedVerification} onReview={review} /><ReviewDialog action={reviewAction} onClose={() => { setReviewAction(null); setUserId(null); }} /></div>;
 }

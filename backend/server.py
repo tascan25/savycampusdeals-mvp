@@ -1381,6 +1381,247 @@ async def _coupon_counts_by_outlet(query: dict) -> dict:
     return {row["_id"]: row["count"] for row in rows if row.get("_id")}
 
 
+async def _analytics_daily_counts(collection, query: dict, date_field: str) -> dict:
+    rows = await collection.aggregate(
+        [
+            {"$match": query},
+            {
+                "$group": {
+                    "_id": {
+                        "$dateToString": {
+                            "format": "%Y-%m-%d",
+                            "date": f"${date_field}",
+                            "timezone": "Asia/Kolkata",
+                        }
+                    },
+                    "count": {"$sum": 1},
+                }
+            },
+            {"$sort": {"_id": 1}},
+        ]
+    ).to_list(400)
+    return {row["_id"]: row["count"] for row in rows if row.get("_id")}
+
+
+@api.get("/admin/analytics")
+async def admin_analytics(
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    admin=Depends(get_admin_user),
+):
+    """Read-only growth, verification, and outlet activity analytics."""
+    start, end = _admin_report_date_range(date_from, date_to)
+    tomorrow_india = (
+        datetime.now(INDIA_TIMEZONE) + timedelta(days=1)
+    ).replace(hour=0, minute=0, second=0, microsecond=0)
+    if end is None:
+        end = tomorrow_india.astimezone(timezone.utc)
+    if start is None:
+        start = end - timedelta(days=30)
+    if end <= start:
+        raise HTTPException(400, "End date must be on or after start date")
+    if end - start > timedelta(days=366):
+        raise HTTPException(400, "Analytics date range cannot exceed 366 days")
+
+    student_query = {"role": "student"}
+    registration_query = _with_date_range(
+        {**student_query}, "created_at", start, end
+    )
+    approval_query = _with_date_range(
+        {"status": "approved"}, "reviewed_at", start, end
+    )
+    redemption_query = _with_date_range(
+        {
+            "outlet_id": {"$ne": None},
+            "status": "redeemed",
+        },
+        "redeemed_at",
+        start,
+        end,
+    )
+    issued_query = _with_date_range(
+        {"outlet_id": {"$ne": None}}, "created_at", start, end
+    )
+    redeemed_issued_query = _with_date_range(
+        {"outlet_id": {"$ne": None}, "status": "redeemed"},
+        "created_at",
+        start,
+        end,
+    )
+
+    (
+        total_students,
+        verified_students,
+        submitted_students,
+        period_registrations,
+        period_approvals,
+        period_redemptions,
+        period_issued,
+        registration_trend,
+        approval_trend,
+        redemption_trend,
+        college_rows,
+        college_missing,
+        status_rows,
+        issued_by_outlet,
+        redeemed_by_outlet,
+        outlets,
+    ) = await asyncio.gather(
+        db.users.count_documents(student_query),
+        db.users.count_documents(
+            {**student_query, "verification_status": "approved"}
+        ),
+        db.users.count_documents(
+            {
+                **student_query,
+                "verification_status": {
+                    "$nin": ["not_submitted", "unverified", None]
+                },
+            }
+        ),
+        db.users.count_documents(registration_query),
+        db.verifications.count_documents(approval_query),
+        db.coupons.count_documents(redemption_query),
+        db.coupons.count_documents(issued_query),
+        _analytics_daily_counts(db.users, registration_query, "created_at"),
+        _analytics_daily_counts(
+            db.verifications, approval_query, "reviewed_at"
+        ),
+        _analytics_daily_counts(db.coupons, redemption_query, "redeemed_at"),
+        db.users.aggregate(
+            [
+                {"$match": registration_query},
+                {
+                    "$project": {
+                        "college": {
+                            "$trim": {"input": {"$ifNull": ["$college", ""]}}
+                        }
+                    }
+                },
+                {"$match": {"college": {"$ne": ""}}},
+                {
+                    "$group": {
+                        "_id": {"$toLower": "$college"},
+                        "college": {"$first": "$college"},
+                        "registrations": {"$sum": 1},
+                    }
+                },
+                {"$sort": {"registrations": -1, "college": 1}},
+                {"$limit": 12},
+            ]
+        ).to_list(12),
+        db.users.count_documents(
+            {
+                **registration_query,
+                "$or": [
+                    {"college": {"$exists": False}},
+                    {"college": None},
+                    {"college": {"$regex": r"^\s*$"}},
+                ],
+            }
+        ),
+        db.coupons.aggregate(
+            [
+                {"$match": issued_query},
+                {
+                    "$group": {
+                        "_id": {"$ifNull": ["$status", "unknown"]},
+                        "count": {"$sum": 1},
+                    }
+                },
+            ]
+        ).to_list(10),
+        _coupon_counts_by_outlet(issued_query),
+        _coupon_counts_by_outlet(redeemed_issued_query),
+        db.outlets.find({}).sort("name", 1).to_list(1000),
+    )
+
+    start_date = start.astimezone(INDIA_TIMEZONE).date()
+    end_date = (end.astimezone(INDIA_TIMEZONE) - timedelta(microseconds=1)).date()
+    trend = []
+    current_date = start_date
+    while current_date <= end_date:
+        key = current_date.isoformat()
+        trend.append(
+            {
+                "date": key,
+                "registrations": registration_trend.get(key, 0),
+                "approvals": approval_trend.get(key, 0),
+                "redemptions": redemption_trend.get(key, 0),
+            }
+        )
+        current_date += timedelta(days=1)
+
+    top_outlets = sorted(
+        [
+            {
+                "outlet_id": str(outlet["_id"]),
+                "outlet_name": outlet.get("name", ""),
+                "city": outlet.get("city", ""),
+                "issued": issued_by_outlet.get(outlet["_id"], 0),
+                "redeemed": redeemed_by_outlet.get(outlet["_id"], 0),
+                "redemption_rate": round(
+                    (
+                        redeemed_by_outlet.get(outlet["_id"], 0)
+                        / issued_by_outlet.get(outlet["_id"], 0)
+                        * 100
+                    ),
+                    1,
+                )
+                if issued_by_outlet.get(outlet["_id"], 0)
+                else 0,
+            }
+            for outlet in outlets
+            if issued_by_outlet.get(outlet["_id"], 0)
+            or redeemed_by_outlet.get(outlet["_id"], 0)
+        ],
+        key=lambda row: (-row["redeemed"], -row["issued"], row["outlet_name"]),
+    )[:10]
+
+    status_counts = {
+        row["_id"]: row["count"] for row in status_rows if row.get("_id")
+    }
+    verification_rate = (
+        round(verified_students / total_students * 100, 1)
+        if total_students
+        else 0
+    )
+    return {
+        "period": {
+            "date_from": start_date.isoformat(),
+            "date_to": end_date.isoformat(),
+        },
+        "summary": {
+            "total_students": total_students,
+            "verified_students": verified_students,
+            "verification_rate": verification_rate,
+            "registrations": period_registrations,
+            "approvals": period_approvals,
+            "redemptions": period_redemptions,
+            "issued": period_issued,
+        },
+        "trend": trend,
+        "verification_funnel": {
+            "registered": total_students,
+            "submitted": submitted_students,
+            "approved": verified_students,
+        },
+        "college_registrations": [
+            {
+                "college": row.get("college") or "Unnamed college",
+                "registrations": row.get("registrations", 0),
+            }
+            for row in college_rows
+        ],
+        "registrations_without_college": college_missing,
+        "redemption_status": [
+            {"status": status, "count": status_counts.get(status, 0)}
+            for status in ("active", "redeemed", "expired")
+        ],
+        "top_outlets": top_outlets,
+    }
+
+
 @api.get("/admin/outlet-redemptions")
 async def admin_outlet_redemptions(
     outlet_id: Optional[str] = Query(None),

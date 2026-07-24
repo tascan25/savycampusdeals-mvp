@@ -1,7 +1,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowRight, BadgeCheck, Sparkles, ShieldCheck, Zap, Users, Star, ChevronDown, MapPin, Utensils } from "lucide-react";
+import { ArrowRight, BadgeCheck, Sparkles, ShieldCheck, Zap, Users, Star, ChevronDown, MapPin, Utensils, Instagram, Mail } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import api from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
@@ -379,12 +379,40 @@ export default function Landing() {
       )}
 
       <footer className="relative border-t border-white/5 py-10 mt-10">
-        <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-4 text-sm text-zinc-500">
-          <div className="flex items-center gap-2">
-            <div className="h-6 w-6 rounded-md bg-gradient-to-br from-indigo-500 to-purple-600"/>
-            <span className="font-display font-bold text-white">SavyCampusDeals</span>
+        <div className="max-w-7xl mx-auto px-6 grid grid-cols-1 md:grid-cols-[1.35fr_1fr_1.3fr] gap-8 md:gap-10 items-start text-sm">
+          <div className="min-w-0 flex items-start gap-3">
+            <div className="h-6 w-6 shrink-0 rounded-md bg-gradient-to-br from-indigo-500 to-purple-600"/>
+            <div className="min-w-0">
+              <div className="font-display font-bold text-white">SavyCampusDeals</div>
+              <p className="mt-2 max-w-xs text-sm leading-relaxed text-zinc-500">
+                Student deals, local offers and exclusive savings.
+              </p>
+            </div>
           </div>
-          <div>© {new Date().getFullYear()} Savy Labs. Made in India for Indian students.</div>
+
+          <div className="min-w-0 flex flex-col items-start gap-3">
+            <a
+              href="https://www.instagram.com/savvycampusdeals?igsh=NzlseDJ0Nm90MDFy"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Follow SavyCampusDeals on Instagram"
+              className="inline-flex max-w-full items-center gap-2 text-zinc-400 transition-colors hover:text-pink-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400/70 focus-visible:ring-offset-4 focus-visible:ring-offset-[#050505] rounded-sm"
+            >
+              <Instagram size={17} className="shrink-0" aria-hidden="true"/>
+              <span className="[overflow-wrap:anywhere]">@savvycampusdeals</span>
+            </a>
+            <a
+              href="mailto:savycampus@gmail.com"
+              className="inline-flex max-w-full items-center gap-2 text-zinc-400 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/70 focus-visible:ring-offset-4 focus-visible:ring-offset-[#050505] rounded-sm"
+            >
+              <Mail size={17} className="shrink-0" aria-hidden="true"/>
+              <span className="[overflow-wrap:anywhere]">savycampus@gmail.com</span>
+            </a>
+          </div>
+
+          <div className="min-w-0 text-left leading-relaxed text-zinc-500 md:text-right">
+            © 2026 Savy Campus. Made in India for Indian students.
+          </div>
         </div>
       </footer>
     </div>
