@@ -182,5 +182,59 @@
       "trending": true
     }
   ]
+},
+{
+  "name": "REPX GYM",
+  "tagline": "Train Hard. Save More.",
+  "cuisine": "Gym, Fitness Center",
+  "city": "Muradnagar",
+  "address": "Asalat Nagar, Muradnagar, Uttar Pradesh 201206",
+
+  "lat": 28.75479106892769,
+  "lng": 77.49545672521808,
+
+  "image_url": "/images/outlets/repx-gym/thumbnail.webp",
+  "cover_url": "/images/outlets/repx-gym/cover.webp",
+  "logo_url": "/images/outlets/repx-gym/logo.webp",
+
+  "phone": "+91 8077970737",
+  "hours": "5:00 AM – 10:00 PM",
+  "rating": 4.7,
+
+  "offers": [
+    {
+      "title": "Exclusive Student Deal – 10% OFF (1 Month Membership)",
+      "category": "Fitness",
+      "discount": "10% OFF",
+      "description": "Verified students get 10% OFF on a 1-month gym membership.",
+      "terms": "Valid on a 1-month membership plan only. Student verification is mandatory.",
+      "redemption_policy": "once",
+      "validity": "Ongoing",
+      "featured": true,
+      "trending": true
+    },
+    {
+      "title": "Exclusive Student Deal – 15% OFF (2 Month Membership)",
+      "category": "Fitness",
+      "discount": "15% OFF",
+      "description": "Verified students get 15% OFF on a 2-month gym membership.",
+      "terms": "Valid on a 2-month membership plan only. Student verification is mandatory.",
+      "redemption_policy": "once",
+      "validity": "Ongoing",
+      "featured": false,
+      "trending": true
+    },
+    {
+      "title": "Exclusive Student Deal – 20% OFF (3 Month Membership)",
+      "category": "Fitness",
+      "discount": "20% OFF",
+      "description": "Verified students get 20% OFF on a 3-month gym membership.",
+      "terms": "Valid on a 3-month membership plan only. Student verification is mandatory.",
+      "redemption_policy": "once",
+      "validity": "Ongoing",
+      "featured": false,
+      "trending": true
+    }
+  ]
 }
 ]
