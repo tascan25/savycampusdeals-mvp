@@ -38,6 +38,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, EmailStr, Field
 from pymongo.errors import DuplicateKeyError
+from services.cloudinary_service import (
+    CloudinaryUploadError,
+    InvalidVerificationImage,
+    delete_verification_image,
+    upload_verification_image,
+    validate_verification_image,
+)
 from utils.json_loader import load_data
 
 # -----------------------------
@@ -783,20 +790,48 @@ async def submit_verification(
         )
 
     trusted_email = is_approved_college_email(user["email"])
-    if not trusted_email and (
-        not is_image_data_uri(body.college_id_image)
-        or not is_image_data_uri(body.selfie_image)
-    ):
-        raise HTTPException(
-            400,
-            "Upload valid college ID card and selfie images for manual review.",
-        )
+    uploaded_images: list[dict[str, str]] = []
+    college_id_image = body.college_id_image
+    selfie_image = body.selfie_image
+    if not trusted_email:
+        try:
+            # Validate every required image before making the first external upload.
+            validate_verification_image(body.college_id_image)
+            validate_verification_image(body.selfie_image)
+        except InvalidVerificationImage as exc:
+            raise HTTPException(400, str(exc)) from None
+
+        try:
+            college_upload = await asyncio.to_thread(
+                upload_verification_image,
+                body.college_id_image,
+                asset_type="college-id",
+                user_identifier=str(user["_id"]),
+            )
+            uploaded_images.append(college_upload)
+            selfie_upload = await asyncio.to_thread(
+                upload_verification_image,
+                body.selfie_image,
+                asset_type="selfie-with-id",
+                user_identifier=str(user["_id"]),
+            )
+            uploaded_images.append(selfie_upload)
+        except (CloudinaryUploadError, RuntimeError):
+            await _cleanup_verification_uploads(uploaded_images)
+            raise HTTPException(
+                503,
+                "Verification image upload is temporarily unavailable. Please try again.",
+            ) from None
+
+        college_id_image = college_upload["secure_url"]
+        selfie_image = selfie_upload["secure_url"]
 
     now = datetime.now(timezone.utc)
     doc = {
+        "_id": ObjectId(),
         "user_id": user["_id"],
-        "college_id_image": body.college_id_image,
-        "selfie_image": body.selfie_image,
+        "college_id_image": college_id_image,
+        "selfie_image": selfie_image,
         "college_name": body.college_name,
         "course": body.course,
         "year": body.year,
@@ -808,13 +843,25 @@ async def submit_verification(
         "reviewed_at": now if trusted_email else None,
         "reviewer_note": "Auto-approved via approved college email domain" if trusted_email else "",
     }
+    if not trusted_email:
+        doc.update({
+            "college_id_image_public_id": college_upload["public_id"],
+            "selfie_image_public_id": selfie_upload["public_id"],
+        })
     try:
         await db.verifications.insert_one(doc)
     except DuplicateKeyError:
+        await _cleanup_verification_uploads(uploaded_images)
         raise HTTPException(
             409,
             "This Student ID / Roll Number has already been used for verification.",
         )
+    except Exception:
+        await _cleanup_verification_uploads(uploaded_images)
+        raise HTTPException(
+            503,
+            "Verification could not be saved. Please try again.",
+        ) from None
 
     user_updates = {
         "verification_status": "approved" if trusted_email else "pending",
@@ -830,7 +877,22 @@ async def submit_verification(
             "verification_expiry": now + timedelta(days=365),
         })
         update["$inc"] = {"reward_points": 200}
-    await db.users.update_one({"_id": user["_id"]}, update)
+    try:
+        user_result = await db.users.update_one({"_id": user["_id"]}, update)
+        if not user_result.matched_count:
+            raise RuntimeError("Verification user no longer exists")
+    except Exception:
+        try:
+            await db.verifications.delete_one({"_id": doc["_id"]})
+        except Exception:
+            logger.warning(
+                "Verification document rollback could not be completed"
+            )
+        await _cleanup_verification_uploads(uploaded_images)
+        raise HTTPException(
+            503,
+            "Verification could not be saved. Please try again.",
+        ) from None
 
     if not trusted_email:
         send_email(
@@ -850,6 +912,30 @@ async def submit_verification(
         "verification_method": "college_email" if trusted_email else "document_review",
         "user": serialize_user(fresh),
     }
+
+
+async def _cleanup_verification_uploads(
+    uploaded_images: list[dict[str, str]],
+) -> None:
+    if not uploaded_images:
+        return
+    results = await asyncio.gather(
+        *[
+            asyncio.to_thread(
+                delete_verification_image,
+                image.get("public_id", ""),
+            )
+            for image in uploaded_images
+        ],
+        return_exceptions=True,
+    )
+    if any(
+        isinstance(result, Exception) or result is False
+        for result in results
+    ):
+        logger.warning(
+            "One or more verification image cleanup attempts could not be completed"
+        )
 
 
 async def get_admin_user(request: Request) -> dict:
@@ -1119,8 +1205,8 @@ def serialize_admin_verification(doc: dict, include_images: bool = False) -> dic
         "has_selfie_image": bool(doc.get("selfie_image")),
     }
     if include_images:
-        # These are existing Base64 data URIs. Keep them out of lists so the
-        # dashboard remains responsive; send them only for an opened profile.
+        # Values may be legacy Base64 data URIs or new Cloudinary HTTPS URLs.
+        # Keep images out of lists and send them only for an opened profile.
         result["college_id_image"] = doc.get("college_id_image", "")
         result["selfie_image"] = doc.get("selfie_image", "")
         result["selfie_with_id"] = doc.get("selfie_image", "")

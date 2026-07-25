@@ -54,7 +54,9 @@ function StatusBadge({ status }) {
 }
 
 function ImagePreview({ label, src, onOpen }) {
-  const valid = typeof src === "string" && src.startsWith("data:image/");
+  const valid = typeof src === "string" && (
+    src.startsWith("data:image/") || src.startsWith("https://")
+  );
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.03] overflow-hidden">
       <div className="px-4 py-3 text-sm font-semibold">{label}</div>
