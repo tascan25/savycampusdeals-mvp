@@ -23,6 +23,7 @@ export default function DigitalStudentCard({ card }) {
     <div className="perspective-[1200px] w-full max-w-md mx-auto" data-testid="student-card">
       <motion.div
         ref={ref}
+        data-student-card-surface
         onMouseMove={onMove}
         onMouseLeave={onLeave}
         style={{ rotateY: rotY, rotateX: rotX, transformStyle: "preserve-3d" }}
@@ -48,9 +49,9 @@ export default function DigitalStudentCard({ card }) {
         <div className="relative mt-6 flex items-end justify-between">
           <div className="min-w-0">
             <div className="text-[10px] uppercase tracking-[0.25em] text-white/50">Name</div>
-            <div className="font-display text-lg font-bold truncate max-w-[220px]" data-testid="student-card-name">{card.name}</div>
+            <div className="font-display text-lg leading-snug font-bold truncate max-w-[220px] pb-px" data-testid="student-card-name">{card.name}</div>
             <div className="text-[10px] uppercase tracking-[0.25em] text-white/50 mt-3">College</div>
-            <div className="text-sm text-white/90 truncate max-w-[220px]" data-testid="student-card-college">{card.college || "—"}</div>
+            <div className="text-sm leading-relaxed text-white/90 truncate max-w-[220px] pb-px" data-testid="student-card-college">{card.college || "—"}</div>
           </div>
           <div className="rounded-xl bg-white p-1.5 shadow-lg">
             {card.qr_data_uri ? (
@@ -64,11 +65,11 @@ export default function DigitalStudentCard({ card }) {
         <div className="relative mt-4 flex items-center justify-between text-[11px] text-white/70">
           <div>
             <div className="uppercase tracking-[0.25em] text-white/40">ID</div>
-            <div className="font-mono font-semibold text-white" data-testid="student-card-number">{card.student_number}</div>
+            <div className="font-mono leading-snug font-semibold text-white" data-testid="student-card-number">{card.student_number}</div>
           </div>
           <div className="text-right">
             <div className="uppercase tracking-[0.25em] text-white/40">Valid Till</div>
-            <div className="font-semibold text-white" data-testid="student-card-expiry">{expiryDate}</div>
+            <div className="leading-snug font-semibold text-white" data-testid="student-card-expiry">{expiryDate}</div>
           </div>
         </div>
       </motion.div>

@@ -381,9 +381,9 @@ export default function Landing() {
       <footer className="relative border-t border-white/5 py-10 mt-10">
         <div className="max-w-7xl mx-auto px-6 grid grid-cols-1 md:grid-cols-[1.35fr_1fr_1.3fr] gap-8 md:gap-10 items-start text-sm">
           <div className="min-w-0 flex items-start gap-3">
-            <div className="h-6 w-6 shrink-0 rounded-md bg-gradient-to-br from-indigo-500 to-purple-600"/>
+            <img src="/brand_logo.jpeg" alt="" className="h-7 w-7 shrink-0 rounded-md object-cover" />
             <div className="min-w-0">
-              <div className="font-display font-bold text-white">SavyCampusDeals</div>
+              <div className="font-display font-bold text-white">Savvy Campus</div>
               <p className="mt-2 max-w-xs text-sm leading-relaxed text-zinc-500">
                 Student deals, local offers and exclusive savings.
               </p>
@@ -395,7 +395,7 @@ export default function Landing() {
               href="https://www.instagram.com/savvycampusdeals?igsh=NzlseDJ0Nm90MDFy"
               target="_blank"
               rel="noopener noreferrer"
-              aria-label="Follow SavyCampusDeals on Instagram"
+              aria-label="Follow Savvy Campus on Instagram"
               className="inline-flex max-w-full items-center gap-2 text-zinc-400 transition-colors hover:text-pink-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400/70 focus-visible:ring-offset-4 focus-visible:ring-offset-[#050505] rounded-sm"
             >
               <Instagram size={17} className="shrink-0" aria-hidden="true"/>
@@ -411,7 +411,7 @@ export default function Landing() {
           </div>
 
           <div className="min-w-0 text-left leading-relaxed text-zinc-500 md:text-right">
-            © 2026 Savy Campus. Made in India for Indian students.
+            © 2026 Savvy Campus. Made in India for Indian students.
           </div>
         </div>
       </footer>

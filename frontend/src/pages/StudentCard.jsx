@@ -25,12 +25,31 @@ export default function StudentCard() {
     if (!cardRef.current) return;
     setDownloading(true);
     try {
+      if (document.fonts?.ready) await document.fonts.ready;
+      const images = Array.from(cardRef.current.querySelectorAll("img"));
+      await Promise.all(images.map(async (image) => {
+        if (!image.complete) {
+          await new Promise((resolve) => {
+            image.addEventListener("load", resolve, { once: true });
+            image.addEventListener("error", resolve, { once: true });
+          });
+        }
+        if (image.decode) await image.decode().catch(() => {});
+      }));
+
       const canvas = await html2canvas(cardRef.current, {
         backgroundColor: null,
         scale: 3,
         useCORS: true,
         allowTaint: true,
         logging: false,
+        onclone: (clonedDocument) => {
+          const surface = clonedDocument.querySelector("[data-student-card-surface]");
+          if (surface) {
+            surface.style.transform = "none";
+            surface.style.transformStyle = "flat";
+          }
+        },
       });
       const url = canvas.toDataURL("image/png");
       const a = document.createElement("a");

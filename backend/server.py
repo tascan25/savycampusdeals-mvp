@@ -292,7 +292,7 @@ def send_email(to: str, subject: str, html: str, attachments=None) -> dict:
         return {"ok": False, "error": "no_api_key"}
     try:
         params = {
-            "from": f"SavyCampusDeals <{FROM_EMAIL}>",
+            "from": f"SavvyCampus <{FROM_EMAIL}>",
             "to": [to],
             "subject": subject,
             "html": html,
@@ -327,7 +327,7 @@ def normalize_student_id(value: str) -> str:
 
 
 def verification_email_html(
-    heading: str, body: str, cta_label: str = "Open SavyCampusDeals", cta_path: str = "/dashboard"
+    heading: str, body: str, cta_label: str = "Open SavvyCampusDeals", cta_path: str = "/dashboard"
 ) -> str:
     href = f"{FRONTEND_URL.rstrip('/')}{cta_path}"
     return f"""<div style="font-family:Manrope,Arial,sans-serif;background:#050505;color:#fff;padding:32px;border-radius:16px;max-width:520px;margin:auto">
@@ -463,7 +463,7 @@ async def issue_email_otp(
     user: dict,
     *,
     purpose: str,
-    subject: str = "Your SavyCampusDeals verification code",
+    subject: str = "Your SavvyCampusDeals verification code",
 ) -> tuple[dict, str]:
     now = datetime.now(timezone.utc)
     otp = f"{secrets.randbelow(1000000):06d}"
@@ -576,7 +576,7 @@ async def register(body: RegisterIn, response: Response):
             "You just earned 100 SavyPoints",
             f"""<div style="font-family:Manrope,Arial,sans-serif;background:#050505;color:#fff;padding:32px;border-radius:16px;max-width:520px;margin:auto">
             <h1 style="font-family:Outfit,sans-serif;font-weight:800">+100 SavyPoints</h1>
-            <p>{body.name.split(' ')[0]} just joined SavyCampusDeals using your code <b>{ref_code_raw}</b>. 100 points added to your account.</p>
+            <p>{body.name.split(' ')[0]} just joined SavvyCampusDeals using your code <b>{ref_code_raw}</b>. 100 points added to your account.</p>
             </div>""",
         )
 
@@ -596,7 +596,7 @@ async def register(body: RegisterIn, response: Response):
     )
     email_result = send_email(
         email,
-        "Your SavyCampusDeals verification code",
+        "Your SavvyCampusDeals verification code",
         f"""<div style="font-family:Manrope,Arial,sans-serif;background:#050505;color:#fff;padding:32px;border-radius:16px;max-width:520px;margin:auto">
         <h1 style="font-family:Outfit,sans-serif;font-weight:800">Welcome, {body.name}!</h1>
         <p style="color:#a1a1aa">Enter this 6-digit code on the site to verify your email — expires in 10 minutes.</p>
@@ -686,7 +686,7 @@ async def start_reverification(user=Depends(get_current_user)):
         email_result, otp = await issue_email_otp(
             pending_user,
             purpose="reverification",
-            subject="Renew your SavyCampusDeals student verification",
+            subject="Renew your SavvyCampusDeals student verification",
         )
     except Exception:
         await db.users.update_one(
@@ -877,7 +877,7 @@ async def forgot(body: ForgotIn):
         link = f"{FRONTEND_URL}/reset-password/{token}"
         send_email(
             email,
-            "Reset your SavyCampusDeals password",
+            "Reset your SavvyCampusDeals password",
             f"""
             <!doctype html>
             <html>
@@ -901,7 +901,7 @@ async def forgot(body: ForgotIn):
                                   <table role="presentation" cellpadding="0" cellspacing="0" border="0">
                                     <tr>
                                       <td align="center" style="width:42px; height:42px; border-radius:14px; background:#ffffff; color:#05060a; font-size:19px; line-height:42px; font-weight:800; text-align:center;">S</td>
-                                      <td style="padding-left:12px; color:#ffffff; font-size:17px; line-height:24px; font-weight:700; letter-spacing:0;">SavyCampusDeals</td>
+                                      <td style="padding-left:12px; color:#ffffff; font-size:17px; line-height:24px; font-weight:700; letter-spacing:0;">SavvyCampusDeals</td>
                                     </tr>
                                   </table>
                                 </td>
@@ -919,7 +919,7 @@ async def forgot(body: ForgotIn):
                                       <td style="padding:44px 40px 18px 40px;">
                                         <div style="display:inline-block; padding:7px 11px; border:1px solid #2b3144; border-radius:999px; background-color:#151925; color:#aab3c7; font-size:12px; line-height:16px; font-weight:600; letter-spacing:0.04em; text-transform:uppercase;">Secure account action</div>
                                         <h1 style="margin:20px 0 0 0; color:#ffffff; font-size:34px; line-height:40px; font-weight:750; letter-spacing:0;">Reset Your Password</h1>
-                                        <p style="margin:16px 0 0 0; color:#c8cedb; font-size:16px; line-height:26px; font-weight:400;">We received a request to reset the password for your SavyCampusDeals account. Use the button below to choose a new password and get back to discovering student deals.</p>
+                                        <p style="margin:16px 0 0 0; color:#c8cedb; font-size:16px; line-height:26px; font-weight:400;">We received a request to reset the password for your SavvyCampusDeals account. Use the button below to choose a new password and get back to discovering student deals.</p>
                                       </td>
                                     </tr>
                                     <tr>
@@ -961,9 +961,9 @@ async def forgot(body: ForgotIn):
                         </tr>
                         <tr>
                           <td align="center" style="padding:24px 12px 0 12px;">
-                            <p style="margin:0; color:#8f98aa; font-size:13px; line-height:20px; font-weight:700;">SavyCampusDeals</p>
+                            <p style="margin:0; color:#8f98aa; font-size:13px; line-height:20px; font-weight:700;">SavvyCampusDeals</p>
                             <p style="margin:6px 0 0 0; color:#6f788a; font-size:12px; line-height:19px;">Support: <a href="mailto:{FROM_EMAIL}" style="color:#aeb7c9; text-decoration:none;">{FROM_EMAIL}</a></p>
-                            <p style="margin:6px 0 0 0; color:#596173; font-size:12px; line-height:19px;">&copy; {datetime.now().year} SavyCampusDeals. All rights reserved.</p>
+                            <p style="margin:6px 0 0 0; color:#596173; font-size:12px; line-height:19px;">&copy; {datetime.now().year} SavvyCampusDeals. All rights reserved.</p>
                           </td>
                         </tr>
                       </table>
@@ -2533,7 +2533,7 @@ async def claim_offer(offer_id: str, user=Depends(get_verified_user)):
                   <tr>
                     <td style="width:34px;height:34px;border-radius:10px;background-color:#7c3aed;text-align:center;font-size:18px;line-height:34px;">S</td>
                     <td style="padding-left:10px;vertical-align:middle;">
-                      <div style="font-size:16px;line-height:20px;font-weight:700;letter-spacing:-0.3px;color:#ffffff;">SavyCampusDeals</div>
+                      <div style="font-size:16px;line-height:20px;font-weight:700;letter-spacing:-0.3px;color:#ffffff;">SavvyCampusDeals</div>
                       <div style="font-size:11px;line-height:16px;color:#a1a1aa;">Exclusive student deals</div>
                     </td>
                   </tr>
@@ -2608,9 +2608,9 @@ async def claim_offer(offer_id: str, user=Depends(get_verified_user)):
             </tr>
             <tr>
               <td style="padding:25px 28px 28px;border:1px solid #312e4b;border-top:0;border-radius:0 0 24px 24px;background-color:#12111d;text-align:center;">
-                <div style="font-size:14px;line-height:20px;font-weight:700;color:#ffffff;">SavyCampusDeals</div>
+                <div style="font-size:14px;line-height:20px;font-weight:700;color:#ffffff;">SavvyCampusDeals</div>
                 <div style="padding-top:5px;font-size:12px;line-height:18px;color:#a1a1aa;">Helping students save more every day.</div>
-                <div style="padding-top:13px;font-size:12px;line-height:18px;color:#777286;">Made with &#10084;&#65039; for students &middot; &copy; 2026 SavyCampusDeals</div>
+                <div style="padding-top:13px;font-size:12px;line-height:18px;color:#777286;">Made with &#10084;&#65039; for students &middot; &copy; 2026 SavvyCampusDeals</div>
               </td>
             </tr>
           </table>

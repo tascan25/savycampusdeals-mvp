@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Menu, X, Sparkles, LogOut, User } from "lucide-react";
+import { Menu, X, LogOut, User } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 
 const links = [
@@ -29,10 +29,8 @@ export default function Navbar() {
         className="glass-heavy rounded-full px-4 py-2.5 flex items-center gap-2 w-full max-w-5xl shadow-[0_8px_32px_rgba(0,0,0,0.4)]"
       >
         <Link to="/" data-testid="nav-logo" className="flex items-center gap-2 pl-2 pr-3">
-          <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-indigo-500 via-purple-500 to-blue-500 grid place-items-center">
-            <Sparkles size={16} className="text-white" />
-          </div>
-          <span className="font-display font-bold tracking-tight text-white text-lg">Savy<span className="text-indigo-400">.</span></span>
+          <img src="/brand_logo.jpeg" alt="" className="h-7 w-7 rounded-lg object-cover" />
+          <span className="font-display font-bold tracking-tight text-white text-lg">Savvy<span className="text-indigo-400">.</span></span>
         </Link>
         <div className="hidden md:flex items-center gap-1 ml-2">
           {visibleLinks.map(l => (

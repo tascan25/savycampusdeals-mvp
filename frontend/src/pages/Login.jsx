@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowRight, Sparkles, Loader2 } from "lucide-react";
+import { ArrowRight, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
 
@@ -49,10 +49,8 @@ export default function Login() {
         className="glass-heavy rounded-3xl p-8 md:p-10 w-full max-w-md relative z-10"
       >
         <Link to="/" className="inline-flex items-center gap-2 mb-8">
-          <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-indigo-500 via-purple-500 to-blue-500 grid place-items-center">
-            <Sparkles size={16} className="text-white"/>
-          </div>
-          <span className="font-display font-bold text-lg">Savy<span className="text-indigo-400">.</span></span>
+          <img src="/brand_logo.jpeg" alt="" className="h-8 w-8 rounded-lg object-cover" />
+          <span className="font-display font-bold text-lg">Savvy<span className="text-indigo-400">.</span></span>
         </Link>
         <h1 className="font-display text-3xl md:text-4xl font-extrabold tracking-tight">Welcome back</h1>
         <p className="text-zinc-400 text-sm mt-2">Log in to access student perks or your partner scanner.</p>
@@ -96,7 +94,7 @@ export default function Login() {
         </form>
 
         <div className="mt-6 text-sm text-zinc-400 text-center">
-          New to Savy? <Link to="/signup" data-testid="login-signup-link" className="text-white font-semibold hover:text-indigo-300">Create account</Link>
+          New to Savvy? <Link to="/signup" data-testid="login-signup-link" className="text-white font-semibold hover:text-indigo-300">Create account</Link>
         </div>
       </motion.div>
     </div>
