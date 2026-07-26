@@ -104,13 +104,13 @@ export default function VerifyEmailOtp() {
   };
 
   return (
-    <div className="min-h-screen bg-[#050505] grain flex items-center justify-center px-6 relative overflow-hidden">
+    <div className="min-h-screen bg-[#050505] grain flex items-center justify-center px-4 sm:px-6 relative overflow-hidden">
       <div className="aurora bg-indigo-600/40" style={{ width: 500, height: 500, top: -100, left: -100 }} />
       <div className="aurora bg-purple-600/30" style={{ width: 400, height: 400, bottom: -100, right: -100 }} />
 
       <motion.div
         initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}
-        className="glass-heavy rounded-3xl p-8 md:p-10 w-full max-w-md relative z-10"
+        className="glass-heavy rounded-3xl p-5 sm:p-8 md:p-10 w-full max-w-md relative z-10"
         data-testid="otp-page"
       >
         <div className="inline-flex items-center gap-2 mb-6">
@@ -125,7 +125,7 @@ export default function VerifyEmailOtp() {
 
         <h1 className="font-display text-3xl font-extrabold tracking-tight">Enter the 6-digit code</h1>
         <p className="text-zinc-400 text-sm mt-2">
-          We sent a code to <span className="text-white font-semibold">{email}</span>. It expires in 10 minutes.
+          We sent a code to <span className="text-white font-semibold [overflow-wrap:anywhere]">{email}</span>. It expires in 10 minutes.
         </p>
 
         {devDelivery && devOtp && (
@@ -137,12 +137,12 @@ export default function VerifyEmailOtp() {
             </p>
             <div className="mt-3 rounded-lg bg-black/40 border border-amber-400/30 p-3 flex items-center justify-between">
               <span className="text-[10px] uppercase tracking-widest text-amber-300">Your code</span>
-              <span className="font-mono font-bold text-2xl text-amber-100 tracking-[0.35em]" data-testid="otp-dev-code">{devOtp}</span>
+              <span className="font-mono font-bold text-xl sm:text-2xl text-amber-100 tracking-[0.2em] sm:tracking-[0.35em]" data-testid="otp-dev-code">{devOtp}</span>
             </div>
           </div>
         )}
 
-        <div className="mt-8 flex justify-between gap-2" onPaste={onPaste} data-testid="otp-inputs">
+        <div className="mt-8 grid grid-cols-6 gap-1.5 sm:gap-2" onPaste={onPaste} data-testid="otp-inputs">
           {digits.map((d, i) => (
             <input
               key={i}
@@ -154,7 +154,7 @@ export default function VerifyEmailOtp() {
               value={d}
               onChange={(e) => onChange(i, e.target.value)}
               onKeyDown={(e) => onKeyDown(i, e)}
-              className="w-12 h-14 rounded-xl bg-white/5 border border-white/10 text-center text-white font-mono text-2xl font-bold focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/40 focus:outline-none"
+              className="h-12 w-full min-w-0 rounded-lg sm:h-14 sm:rounded-xl bg-white/5 border border-white/10 text-center text-white font-mono text-xl sm:text-2xl font-bold focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/40 focus:outline-none"
             />
           ))}
         </div>
@@ -170,7 +170,7 @@ export default function VerifyEmailOtp() {
           {loading ? <Loader2 size={16} className="animate-spin" /> : <>Verify <Sparkles size={14} /></>}
         </button>
 
-        <div className="mt-6 flex items-center justify-between text-sm">
+        <div className="mt-6 flex flex-col items-start justify-between gap-3 text-sm sm:flex-row sm:items-center">
           <button
             data-testid="otp-resend"
             onClick={resend}

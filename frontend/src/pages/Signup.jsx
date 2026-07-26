@@ -123,19 +123,32 @@ export default function Signup() {
 
         <form className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4" onSubmit={onSubmit}>
           {[
-            { k: "name", label: "Full name", type: "text", required: true, span: 2 },
-            { k: "email", label: "Email", type: "email", required: true, span: 2 },
+            { k: "name", label: "Full name", type: "text", required: true, span: 2, autoComplete: "name" },
+            {
+              k: "email",
+              label: "Email",
+              type: "email",
+              required: true,
+              span: 2,
+              autoComplete: "email",
+              placeholder: "Primary or college email",
+              hint: "Use an inbox you can access. A supported college email may speed up student verification.",
+            },
           ].map((field) => (
             <div key={field.k} className={field.span === 2 ? "md:col-span-2" : ""}>
-              <label className="text-xs uppercase tracking-widest text-zinc-500">{field.label}</label>
+              <label htmlFor={`signup-${field.k}`} className="text-xs uppercase tracking-widest text-zinc-500">{field.label}</label>
               <input
+                id={`signup-${field.k}`}
                 data-testid={`signup-${field.k}-input`}
                 type={field.type}
                 required={field.required}
+                autoComplete={field.autoComplete}
+                placeholder={field.placeholder}
                 value={f[field.k]}
                 onChange={update(field.k)}
-                className="mt-2 w-full rounded-xl bg-white/5 border border-white/10 px-4 py-3 text-white focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/40 focus:outline-none transition-colors"
+                className="mt-2 w-full rounded-xl bg-white/5 border border-white/10 px-4 py-3 text-white placeholder:text-zinc-600 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/40 focus:outline-none transition-colors"
               />
+              {field.hint && <p className="mt-2 text-xs leading-relaxed text-zinc-500">{field.hint}</p>}
             </div>
           ))}
 
