@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Upload, Loader2, BadgeCheck, ShieldCheck, ArrowRight, Clock3 } from "lucide-react";
 import { toast } from "sonner";
@@ -38,7 +38,8 @@ function ImageUpload({ label, value, onChange, testId }) {
 }
 
 export default function Verify() {
-  const { user, refreshUser } = useAuth();
+  const { user, refreshUser, setUser } = useAuth();
+  const nav = useNavigate();
   const [f, setF] = useState({
     college_id_image: "", selfie_image: "",
     college_name: user?.college || "", course: user?.course || "", year: user?.year || "",
@@ -47,9 +48,62 @@ export default function Verify() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [renewing, setRenewing] = useState(false);
   const isCollegeEmail = user?.verification_method === "college_email";
 
   const update = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+  const startRenewal = async () => {
+    setRenewing(true);
+    setErr("");
+    try {
+      const { data } = await api.post("/auth/start-reverification");
+      setUser(data.user);
+      toast.success("We sent a fresh verification code to your email.");
+      nav("/verify-email", {
+        replace: true,
+        state: {
+          email: data.user.email,
+          dev_otp: data.dev_otp,
+          email_sent: data.email_sent,
+        },
+      });
+    } catch (e) {
+      const message = formatApiError(e.response?.data?.detail);
+      setErr(message);
+      toast.error(message);
+    } finally {
+      setRenewing(false);
+    }
+  };
+
+  if (
+    user?.verification_status === "expired"
+    && !user?.reverification_email_verified
+  ) {
+    return (
+      <div className="min-h-screen bg-[#050505] grain">
+        <Navbar/>
+        <div className="max-w-2xl mx-auto px-6 pt-32 text-center">
+          <div className="inline-flex h-16 w-16 rounded-2xl bg-amber-500/15 border border-amber-400/30 items-center justify-center">
+            <ShieldCheck className="text-amber-300" size={32}/>
+          </div>
+          <h1 className="font-display text-4xl font-extrabold mt-4">Renew your student verification</h1>
+          <p className="text-zinc-300 mt-4">Your one-year student verification has expired.</p>
+          <p className="text-zinc-400 mt-2">First, verify your email again. You can correct the address on the OTP screen if needed.</p>
+          {err && <div className="mt-4 text-sm text-red-400">{err}</div>}
+          <button
+            data-testid="verify-start-renewal"
+            onClick={startRenewal}
+            disabled={renewing}
+            className="mt-7 inline-flex items-center gap-2 rounded-full bg-white text-black font-semibold px-6 py-3 disabled:opacity-60"
+          >
+            {renewing ? <Loader2 size={16} className="animate-spin"/> : <>Verify email and renew <ArrowRight size={14}/></>}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (submitted || user?.verification_status === "pending") {
     return (

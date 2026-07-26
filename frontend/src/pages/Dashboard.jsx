@@ -54,10 +54,14 @@ export default function Dashboard() {
           >
             <ShieldAlert className="text-amber-300 shrink-0" size={24}/>
             <div className="flex-1">
-              <div className="font-display font-bold text-amber-100">You're not verified yet</div>
-              <div className="text-sm text-amber-100/70">Verify your student status to claim any offer.</div>
+              <div className="font-display font-bold text-amber-100">
+                {user?.verification_status === "expired" ? "Your student verification has expired" : "You're not verified yet"}
+              </div>
+              <div className="text-sm text-amber-100/70">
+                {user?.verification_status === "expired" ? "Renew your verification to continue claiming offers." : "Verify your student status to claim any offer."}
+              </div>
             </div>
-            <Link to="/verify" data-testid="dashboard-verify-btn" className="rounded-full bg-white text-black font-semibold px-4 py-2 text-sm">Verify now</Link>
+            <Link to="/verify" data-testid="dashboard-verify-btn" className="rounded-full bg-white text-black font-semibold px-4 py-2 text-sm">{user?.verification_status === "expired" ? "Renew now" : "Verify now"}</Link>
           </motion.div>
         )}
 

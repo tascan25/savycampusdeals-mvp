@@ -33,6 +33,7 @@ const statusStyle = {
   approved: "bg-emerald-500/10 text-emerald-300 border-emerald-400/20",
   pending: "bg-amber-500/10 text-amber-200 border-amber-400/20",
   rejected: "bg-rose-500/10 text-rose-300 border-rose-400/20",
+  expired: "bg-orange-500/10 text-orange-300 border-orange-400/20",
   not_submitted: "bg-zinc-500/10 text-zinc-300 border-zinc-400/20",
 };
 

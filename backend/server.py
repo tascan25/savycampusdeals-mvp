@@ -113,7 +113,7 @@ def create_access_token(uid: str, email: str, role: str) -> str:
 
 
 def serialize_user(u: dict) -> dict:
-    verification_status = u.get("verification_status", "not_submitted")
+    verification_status = effective_verification_status(u)
     # Legacy accounts used "unverified" before verification states were added.
     # Preserve their records while exposing the new public state to clients.
     if verification_status == "unverified":
@@ -135,6 +135,7 @@ def serialize_user(u: dict) -> dict:
         else "document_review",
         "student_number": u.get("student_number", ""),
         "verification_expiry": u.get("verification_expiry"),
+        "reverification_email_verified": has_current_reverification_email(u),
         "reward_points": u.get("reward_points", 0),
         "referral_code": u.get("referral_code", ""),
         "outlet_id": str(u["outlet_id"]) if u.get("outlet_id") else None,
@@ -162,6 +163,7 @@ async def get_current_user(request: Request) -> dict:
         raise HTTPException(401, "User not found")
     if user.get("role") == "outlet_partner" and not user.get("active", True):
         raise HTTPException(403, "This outlet partner account is disabled")
+    user = await expire_verification_if_needed(user)
     return user
 
 
@@ -192,6 +194,55 @@ def _aware(dt):
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt
+
+
+def verification_has_expired(
+    user: dict, now: Optional[datetime] = None
+) -> bool:
+    expiry = user.get("verification_expiry")
+    return bool(
+        expiry
+        and _aware(expiry) < (now or datetime.now(timezone.utc))
+    )
+
+
+def effective_verification_status(user: dict) -> str:
+    status = user.get("verification_status", "not_submitted")
+    if status == "unverified":
+        return "not_submitted"
+    if status == "approved" and verification_has_expired(user):
+        return "expired"
+    return status
+
+
+def has_current_reverification_email(user: dict) -> bool:
+    verified_at = user.get("reverification_email_verified_at")
+    expiry = user.get("verification_expiry")
+    return bool(
+        effective_verification_status(user) == "expired"
+        and verified_at
+        and expiry
+        and _aware(verified_at) > _aware(expiry)
+    )
+
+
+async def expire_verification_if_needed(user: dict) -> dict:
+    if (
+        user.get("role", "student") == "student"
+        and user.get("verification_status") == "approved"
+        and verification_has_expired(user)
+    ):
+        await db.users.update_one(
+            {"_id": user["_id"], "verification_status": "approved"},
+            {
+                "$set": {
+                    "verification_status": "expired",
+                    "verification_expired_at": datetime.now(timezone.utc),
+                }
+            },
+        )
+        user = {**user, "verification_status": "expired"}
+    return user
 
 
 def get_redemption_policy(offer: dict) -> str:
@@ -401,9 +452,65 @@ class OtpResendIn(BaseModel):
     email: EmailStr
 
 
+class EmailChangeIn(BaseModel):
+    email: EmailStr
+
+
 # -----------------------------
 # Auth Routes
 # -----------------------------
+async def issue_email_otp(
+    user: dict,
+    *,
+    purpose: str,
+    subject: str = "Your SavyCampusDeals verification code",
+) -> tuple[dict, str]:
+    now = datetime.now(timezone.utc)
+    otp = f"{secrets.randbelow(1000000):06d}"
+    await db.otp_codes.update_many(
+        {"user_id": user["_id"], "used": False},
+        {"$set": {"used": True}},
+    )
+    await db.otp_codes.insert_one(
+        {
+            "user_id": user["_id"],
+            "email": user["email"],
+            "otp": otp,
+            "purpose": purpose,
+            "attempts": 0,
+            "expires_at": now + timedelta(minutes=10),
+            "used": False,
+            "created_at": now,
+        }
+    )
+    email_result = send_email(
+        user["email"],
+        subject,
+        f"""<div style="font-family:Manrope,Arial,sans-serif;background:#050505;color:#fff;padding:32px;border-radius:16px;max-width:520px;margin:auto">
+        <p>Enter this code to verify your email:</p>
+        <div style="margin:16px 0;padding:20px;background:rgba(79,70,229,0.15);border:1px solid rgba(79,70,229,0.4);border-radius:16px;text-align:center">
+          <div style="font-family:monospace;font-size:40px;letter-spacing:12px;font-weight:800;color:#a5b4fc">{otp}</div>
+        </div>
+        <p style="color:#71717A;font-size:12px">Expires in 10 minutes.</p>
+        </div>""",
+    )
+    logger.info(
+        "OTP issued for user %s (purpose: %s, email delivery: %s)",
+        user["_id"],
+        purpose,
+        email_result["ok"],
+    )
+    return email_result, otp
+
+
+def otp_response(email_result: dict, otp: str, **extra) -> dict:
+    response = {"ok": True, "email_sent": email_result["ok"], **extra}
+    if DEV_OTP_FALLBACK and not email_result["ok"]:
+        response["dev_otp"] = otp
+        response["email_error"] = email_result["error"]
+    return response
+
+
 @api.post("/auth/register")
 async def register(body: RegisterIn, response: Response):
     validate_password(body.password)
@@ -480,6 +587,8 @@ async def register(body: RegisterIn, response: Response):
             "user_id": result.inserted_id,
             "email": email,
             "otp": otp,
+            "purpose": "signup",
+            "attempts": 0,
             "expires_at": now + timedelta(minutes=10),
             "used": False,
             "created_at": now,
@@ -497,7 +606,11 @@ async def register(body: RegisterIn, response: Response):
         <p style="color:#71717A;font-size:12px">If you didn't create an account, ignore this email.</p>
         </div>""",
     )
-    logger.info(f"OTP for {email}: {otp} (email delivery: {email_result['ok']})")
+    logger.info(
+        "Signup OTP issued for user %s (email delivery: %s)",
+        result.inserted_id,
+        email_result["ok"],
+    )
 
     token = create_access_token(str(result.inserted_id), email, "student")
     set_auth_cookie(response, token)
@@ -527,34 +640,147 @@ async def send_otp(body: OtpResendIn):
     now = datetime.now(timezone.utc)
     if latest and (now - _aware(latest["created_at"])).total_seconds() < 60:
         raise HTTPException(429, "Please wait a minute before requesting a new code")
-    otp = f"{secrets.randbelow(1000000):06d}"
-    await db.otp_codes.insert_one(
+    purpose = (
+        "reverification"
+        if effective_verification_status(user) == "expired"
+        else "signup"
+    )
+    email_result, otp = await issue_email_otp(user, purpose=purpose)
+    return otp_response(email_result, otp)
+
+
+@api.post("/auth/start-reverification")
+async def start_reverification(user=Depends(get_current_user)):
+    if user.get("role", "student") != "student":
+        raise HTTPException(403, "Student account required")
+    if effective_verification_status(user) != "expired":
+        raise HTTPException(409, "Student verification is not expired")
+
+    now = datetime.now(timezone.utc)
+    started_at = user.get("reverification_started_at")
+    if (
+        started_at
+        and (now - _aware(started_at)).total_seconds() < 60
+    ):
+        raise HTTPException(
+            429,
+            "Please wait a minute before requesting another code.",
+        )
+    await db.users.update_one(
+        {"_id": user["_id"]},
         {
-            "user_id": user["_id"],
-            "email": email,
-            "otp": otp,
-            "expires_at": now + timedelta(minutes=10),
-            "used": False,
-            "created_at": now,
-        }
+            "$set": {
+                "email_verified": False,
+                "reverification_started_at": now,
+            },
+            "$unset": {"reverification_email_verified_at": ""},
+        },
     )
-    email_result = send_email(
-        email,
-        "Your SavyCampusDeals verification code",
-        f"""<div style="font-family:Manrope,Arial,sans-serif;background:#050505;color:#fff;padding:32px;border-radius:16px;max-width:520px;margin:auto">
-        <p>Your new verification code:</p>
-        <div style="margin:16px 0;padding:20px;background:rgba(79,70,229,0.15);border:1px solid rgba(79,70,229,0.4);border-radius:16px;text-align:center">
-          <div style="font-family:monospace;font-size:40px;letter-spacing:12px;font-weight:800;color:#a5b4fc">{otp}</div>
-        </div>
-        <p style="color:#71717A;font-size:12px">Expires in 10 minutes.</p>
-        </div>""",
+    pending_user = {
+        **user,
+        "email_verified": False,
+        "reverification_started_at": now,
+    }
+    pending_user.pop("reverification_email_verified_at", None)
+    try:
+        email_result, otp = await issue_email_otp(
+            pending_user,
+            purpose="reverification",
+            subject="Renew your SavyCampusDeals student verification",
+        )
+    except Exception:
+        await db.users.update_one(
+            {"_id": user["_id"], "reverification_started_at": now},
+            {
+                "$set": {"email_verified": True},
+                "$unset": {"reverification_started_at": ""},
+            },
+        )
+        raise HTTPException(
+            503,
+            "Renewal could not be started. Please try again.",
+        ) from None
+    return otp_response(
+        email_result,
+        otp,
+        user=serialize_user(pending_user),
     )
-    logger.info(f"OTP resend for {email}: {otp} (email delivery: {email_result['ok']})")
-    resp = {"ok": True, "email_sent": email_result["ok"]}
-    if DEV_OTP_FALLBACK and not email_result["ok"]:
-        resp["dev_otp"] = otp
-        resp["email_error"] = email_result["error"]
-    return resp
+
+
+@api.post("/auth/change-email")
+async def change_pending_email(
+    body: EmailChangeIn,
+    response: Response,
+    user=Depends(get_current_user),
+):
+    if user.get("role", "student") != "student":
+        raise HTTPException(403, "Student account required")
+    if user.get("email_verified"):
+        raise HTTPException(
+            409,
+            "Email can only be changed while email verification is pending.",
+        )
+
+    new_email = body.email.lower().strip()
+    old_email = user["email"]
+    now = datetime.now(timezone.utc)
+    changed_at = user.get("email_changed_at")
+    if changed_at and (now - _aware(changed_at)).total_seconds() < 60:
+        raise HTTPException(
+            429,
+            "Please wait a minute before changing the email again.",
+        )
+    if new_email == old_email:
+        raise HTTPException(400, "Enter a different email address")
+    if await db.users.find_one({"email": new_email}, {"_id": 1}):
+        raise HTTPException(409, "Email already registered")
+
+    try:
+        update_result = await db.users.update_one(
+            {"_id": user["_id"], "email": old_email},
+            {
+                "$set": {
+                    "email": new_email,
+                    "email_verified": False,
+                    "email_changed_at": now,
+                },
+                "$unset": {"email_verify_token": ""},
+            },
+        )
+    except DuplicateKeyError:
+        raise HTTPException(409, "Email already registered") from None
+    if not update_result.matched_count:
+        raise HTTPException(409, "Email changed in another session. Refresh and retry.")
+
+    changed_user = {**user, "email": new_email, "email_verified": False}
+    purpose = (
+        "reverification"
+        if effective_verification_status(changed_user) == "expired"
+        else "signup"
+    )
+    try:
+        email_result, otp = await issue_email_otp(
+            changed_user,
+            purpose=purpose,
+        )
+    except Exception:
+        await db.users.update_one(
+            {"_id": user["_id"], "email": new_email},
+            {"$set": {"email": old_email}},
+        )
+        raise HTTPException(
+            503,
+            "Email could not be changed. Please try again.",
+        ) from None
+
+    token = create_access_token(str(user["_id"]), new_email, "student")
+    set_auth_cookie(response, token)
+    return otp_response(
+        email_result,
+        otp,
+        user=serialize_user(changed_user),
+        token=token,
+    )
 
 
 @api.post("/auth/verify-otp")
@@ -566,15 +792,34 @@ async def verify_otp(body: OtpVerifyIn):
     if user.get("email_verified"):
         return {"ok": True, "already_verified": True, "user": serialize_user(user)}
     doc = await db.otp_codes.find_one(
-        {"user_id": user["_id"], "otp": body.otp, "used": False},
+        {"user_id": user["_id"], "used": False},
         sort=[("created_at", -1)],
     )
     if not doc:
         raise HTTPException(400, "Invalid code")
     if _aware(doc["expires_at"]) < datetime.now(timezone.utc):
+        await db.otp_codes.update_one(
+            {"_id": doc["_id"]},
+            {"$set": {"used": True}},
+        )
         raise HTTPException(400, "Code has expired. Request a new one.")
+    if not secrets.compare_digest(str(doc.get("otp", "")), body.otp):
+        attempts = int(doc.get("attempts", 0)) + 1
+        update = {"$inc": {"attempts": 1}}
+        if attempts >= 5:
+            update["$set"] = {"used": True}
+        await db.otp_codes.update_one({"_id": doc["_id"]}, update)
+        if attempts >= 5:
+            raise HTTPException(
+                429,
+                "Too many incorrect attempts. Request a new code.",
+            )
+        raise HTTPException(400, "Invalid code")
     await db.otp_codes.update_one({"_id": doc["_id"]}, {"$set": {"used": True}})
-    await db.users.update_one({"_id": user["_id"]}, {"$set": {"email_verified": True}})
+    user_updates = {"email_verified": True}
+    if effective_verification_status(user) == "expired":
+        user_updates["reverification_email_verified_at"] = datetime.now(timezone.utc)
+    await db.users.update_one({"_id": user["_id"]}, {"$set": user_updates})
     fresh = await db.users.find_one({"_id": user["_id"]})
     return {"ok": True, "user": serialize_user(fresh)}
 
@@ -585,6 +830,7 @@ async def login(body: LoginIn, response: Response):
     user = await db.users.find_one({"email": email})
     if not user or not verify_password(body.password, user["password_hash"]):
         raise HTTPException(401, "Invalid email or password")
+    user = await expire_verification_if_needed(user)
     token = create_access_token(str(user["_id"]), email, user.get("role", "student"))
     set_auth_cookie(response, token)
     return {"user": serialize_user(user), "token": token}
@@ -764,8 +1010,15 @@ async def update_profile(body: ProfileUpdateIn, user=Depends(get_current_user)):
 async def submit_verification(
     body: VerificationSubmitIn, user=Depends(get_verified_user)
 ):
-    if user.get("verification_status") == "approved":
+    current_status = effective_verification_status(user)
+    renewing = current_status == "expired"
+    if current_status == "approved":
         raise HTTPException(400, "Already verified")
+    if renewing and not has_current_reverification_email(user):
+        raise HTTPException(
+            403,
+            "Verify your email again before renewing student verification.",
+        )
     if not body.student_id_number.strip():
         raise HTTPException(400, "Student ID / Roll Number is required")
 
@@ -780,19 +1033,38 @@ async def submit_verification(
                 {"student_id_normalized": student_id_normalized},
                 {"student_id_number": {"$regex": legacy_pattern, "$options": "i"}},
             ]
-        },
-        {"_id": 1},
+        }
     )
-    if existing_id:
+    if existing_id and existing_id.get("user_id") != user["_id"]:
         raise HTTPException(
             409,
             "This Student ID / Roll Number has already been used for verification.",
         )
+    reusable_verification = (
+        existing_id
+        if existing_id
+        and existing_id.get("user_id") == user["_id"]
+        and current_status in {"expired", "rejected"}
+        else None
+    )
+    if existing_id and reusable_verification is None:
+        raise HTTPException(
+            409,
+            "A verification request already exists for this Student ID.",
+        )
 
     trusted_email = is_approved_college_email(user["email"])
     uploaded_images: list[dict[str, str]] = []
-    college_id_image = body.college_id_image
-    selfie_image = body.selfie_image
+    college_id_image = (
+        reusable_verification.get("college_id_image", "")
+        if reusable_verification and trusted_email
+        else body.college_id_image
+    )
+    selfie_image = (
+        reusable_verification.get("selfie_image", "")
+        if reusable_verification and trusted_email
+        else body.selfie_image
+    )
     if not trusted_email:
         try:
             # Validate every required image before making the first external upload.
@@ -828,7 +1100,7 @@ async def submit_verification(
 
     now = datetime.now(timezone.utc)
     doc = {
-        "_id": ObjectId(),
+        "_id": reusable_verification["_id"] if reusable_verification else ObjectId(),
         "user_id": user["_id"],
         "college_id_image": college_id_image,
         "selfie_image": selfie_image,
@@ -849,7 +1121,42 @@ async def submit_verification(
             "selfie_image_public_id": selfie_upload["public_id"],
         })
     try:
-        await db.verifications.insert_one(doc)
+        if reusable_verification:
+            verification_result = await db.verifications.update_one(
+                {
+                    "_id": reusable_verification["_id"],
+                    "user_id": user["_id"],
+                    "status": reusable_verification.get("status"),
+                    "submitted_at": reusable_verification.get("submitted_at"),
+                },
+                {
+                    "$set": {
+                        key: value
+                        for key, value in doc.items()
+                        if key != "_id"
+                    },
+                    "$unset": {
+                        "reviewed_by": "",
+                        "rejection_reason": "",
+                    },
+                    "$push": {
+                        "review_history": {
+                            "status": reusable_verification.get("status", ""),
+                            "method": reusable_verification.get("method", ""),
+                            "submitted_at": reusable_verification.get("submitted_at"),
+                            "reviewed_at": reusable_verification.get("reviewed_at"),
+                            "reviewer_note": reusable_verification.get(
+                                "reviewer_note", ""
+                            ),
+                            "archived_at": now,
+                        }
+                    },
+                },
+            )
+            if not verification_result.matched_count:
+                raise RuntimeError("Verification request no longer exists")
+        else:
+            await db.verifications.insert_one(doc)
     except DuplicateKeyError:
         await _cleanup_verification_uploads(uploaded_images)
         raise HTTPException(
@@ -876,14 +1183,21 @@ async def submit_verification(
             "student_number": user.get("student_number") or gen_student_number(),
             "verification_expiry": now + timedelta(days=365),
         })
-        update["$inc"] = {"reward_points": 200}
+        if not user.get("verification_expiry"):
+            update["$inc"] = {"reward_points": 200}
     try:
         user_result = await db.users.update_one({"_id": user["_id"]}, update)
         if not user_result.matched_count:
             raise RuntimeError("Verification user no longer exists")
     except Exception:
         try:
-            await db.verifications.delete_one({"_id": doc["_id"]})
+            if reusable_verification:
+                await db.verifications.replace_one(
+                    {"_id": reusable_verification["_id"]},
+                    reusable_verification,
+                )
+            else:
+                await db.verifications.delete_one({"_id": doc["_id"]})
         except Exception:
             logger.warning(
                 "Verification document rollback could not be completed"
@@ -893,6 +1207,22 @@ async def submit_verification(
             503,
             "Verification could not be saved. Please try again.",
         ) from None
+
+    if reusable_verification and not trusted_email:
+        await _cleanup_verification_uploads(
+            [
+                {
+                    "public_id": reusable_verification.get(
+                        "college_id_image_public_id", ""
+                    )
+                },
+                {
+                    "public_id": reusable_verification.get(
+                        "selfie_image_public_id", ""
+                    )
+                },
+            ]
+        )
 
     if not trusted_email:
         send_email(
@@ -1136,7 +1466,7 @@ async def review_verification(
             "student_number": student.get("student_number") or gen_student_number(),
             "verification_expiry": now + timedelta(days=365),
         })
-        if student.get("verification_status") != "approved":
+        if not student.get("verification_expiry"):
             update["$inc"] = {"reward_points": 200}
     await db.users.update_one({"_id": student["_id"]}, update)
 
@@ -1180,7 +1510,7 @@ def serialize_admin_user(user: dict) -> dict:
         "college": user.get("college", ""),
         "course": user.get("course", ""),
         "year": user.get("year", ""),
-        "verification_status": user.get("verification_status", "not_submitted"),
+        "verification_status": effective_verification_status(user),
         "verification_submitted_at": _admin_datetime(user.get("verification_submitted_at")),
         "verification_reviewed_at": _admin_datetime(user.get("verification_reviewed_at")),
         "verification_rejection_reason": user.get("verification_rejection_reason", ""),
@@ -1266,7 +1596,7 @@ async def _review_pending_verification(
                 "verification_expiry": now + timedelta(days=365),
             }
         )
-        if student.get("verification_status") != "approved":
+        if not student.get("verification_expiry"):
             update["$inc"] = {"reward_points": 200}
     await db.users.update_one({"_id": student["_id"]}, update)
 
@@ -1339,7 +1669,13 @@ async def admin_users(
     page_size: int = Query(20, ge=1, le=100),
     admin=Depends(get_admin_user),
 ):
-    if status and status not in {"approved", "pending", "rejected", "not_submitted"}:
+    if status and status not in {
+        "approved",
+        "pending",
+        "rejected",
+        "expired",
+        "not_submitted",
+    }:
         raise HTTPException(400, "Invalid verification status")
     query: dict = {"role": "student"}
     if status:
@@ -2540,7 +2876,7 @@ async def scan_lookup(body: ScanIn, scanner=Depends(get_scanner_user)):
             user = await db.users.find_one({"student_number": parsed["student_number"]})
         if not user:
             raise HTTPException(404, "Student not found")
-        approved = user.get("verification_status") == "approved"
+        approved = effective_verification_status(user) == "approved"
         expiry = user.get("verification_expiry")
         return {
             "kind": "student",
@@ -2589,7 +2925,9 @@ async def scan_lookup(body: ScanIn, scanner=Depends(get_scanner_user)):
             "student_course": (user or {}).get("course", ""),
             "student_year": (user or {}).get("year", ""),
             "student_avatar_url": (user or {}).get("avatar_url", ""),
-            "student_verified": (user or {}).get("verification_status") == "approved",
+            "student_verified": bool(
+                user and effective_verification_status(user) == "approved"
+            ),
             "student_expiry": student_expiry.isoformat() if student_expiry else None,
             "student_expiry_expired": bool(
                 student_expiry and _aware(student_expiry) < datetime.now(timezone.utc)
@@ -2622,7 +2960,7 @@ async def scan_redeem(body: ScanIn, scanner=Depends(get_scanner_user)):
         raise HTTPException(410, "Coupon has expired")
 
     user = await db.users.find_one({"_id": c["user_id"]})
-    if not user or user.get("verification_status") != "approved":
+    if not user or effective_verification_status(user) != "approved":
         raise HTTPException(403, "Student not verified")
 
     now = datetime.now(timezone.utc)
@@ -3231,6 +3569,9 @@ async def on_startup():
         )
         await db.users.create_index([("verification_status", 1), ("created_at", -1)])
         await db.users.create_index(
+            [("verification_status", 1), ("verification_expiry", 1)]
+        )
+        await db.users.create_index(
             [("outlet_id", 1)],
             unique=True,
             partialFilterExpression={"role": "outlet_partner"},
@@ -3251,8 +3592,22 @@ async def on_startup():
             partialFilterExpression={"student_id_normalized": {"$type": "string"}},
         )
         await db.password_resets.create_index("expires_at", expireAfterSeconds=0)
+        await db.otp_codes.create_index("expires_at", expireAfterSeconds=0)
     except Exception as e:
         logger.warning(f"Index warn: {e}")
+    await db.users.update_many(
+        {
+            "role": "student",
+            "verification_status": "approved",
+            "verification_expiry": {"$lt": datetime.now(timezone.utc)},
+        },
+        {
+            "$set": {
+                "verification_status": "expired",
+                "verification_expired_at": datetime.now(timezone.utc),
+            }
+        },
+    )
     await seed_admin()
     await seed_offers()
     await seed_outlets()

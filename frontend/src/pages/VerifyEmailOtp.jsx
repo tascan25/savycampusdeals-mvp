@@ -7,7 +7,7 @@ import api, { formatApiError } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 
 export default function VerifyEmailOtp() {
-  const { user, refreshUser, logout } = useAuth();
+  const { user, refreshUser, setUser } = useAuth();
   const loc = useLocation();
   const nav = useNavigate();
   const email = user?.email || loc.state?.email || "";
@@ -21,6 +21,9 @@ export default function VerifyEmailOtp() {
   const [loading, setLoading] = useState(false);
   const [resendIn, setResendIn] = useState(0);
   const [err, setErr] = useState("");
+  const [changingEmail, setChangingEmail] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
+  const [emailLoading, setEmailLoading] = useState(false);
   const inputRefs = useRef([]);
 
   useEffect(() => {
@@ -103,6 +106,34 @@ export default function VerifyEmailOtp() {
     }
   };
 
+  const changeEmail = async (e) => {
+    e.preventDefault();
+    setErr("");
+    setEmailLoading(true);
+    try {
+      const { data } = await api.post("/auth/change-email", { email: newEmail });
+      if (data.token) localStorage.setItem("scd_token", data.token);
+      setUser(data.user);
+      setDigits(
+        data.dev_otp
+          ? data.dev_otp.split("")
+          : ["", "", "", "", "", ""]
+      );
+      setDevOtp(data.dev_otp || "");
+      setDevDelivery(data.email_sent === false);
+      setNewEmail("");
+      setChangingEmail(false);
+      setResendIn(60);
+      toast.success(`Verification code sent to ${data.user.email}`);
+    } catch (e) {
+      const message = formatApiError(e.response?.data?.detail);
+      setErr(message);
+      toast.error(message);
+    } finally {
+      setEmailLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#050505] grain flex items-center justify-center px-4 sm:px-6 relative overflow-hidden">
       <div className="aurora bg-indigo-600/40" style={{ width: 500, height: 500, top: -100, left: -100 }} />
@@ -161,6 +192,38 @@ export default function VerifyEmailOtp() {
 
         {err && <div data-testid="otp-error" className="mt-4 text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{err}</div>}
 
+        {changingEmail && (
+          <form onSubmit={changeEmail} className="mt-5 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+            <label className="text-xs uppercase tracking-widest text-zinc-500">Different email address</label>
+            <input
+              data-testid="otp-change-email-input"
+              type="email"
+              required
+              autoFocus
+              value={newEmail}
+              onChange={(e) => setNewEmail(e.target.value)}
+              placeholder="you@college.edu"
+              className="mt-2 w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-white outline-none focus:border-indigo-400"
+            />
+            <div className="mt-3 flex gap-2">
+              <button
+                data-testid="otp-change-email-submit"
+                disabled={emailLoading}
+                className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-black disabled:opacity-60"
+              >
+                {emailLoading ? <Loader2 size={14} className="animate-spin" /> : "Send new code"}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setChangingEmail(false); setNewEmail(""); }}
+                className="rounded-full border border-white/10 px-4 py-2 text-sm text-zinc-300"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        )}
+
         <button
           data-testid="otp-submit"
           onClick={submit}
@@ -181,7 +244,7 @@ export default function VerifyEmailOtp() {
           </button>
           <button
             data-testid="otp-logout"
-            onClick={async () => { await logout(); nav("/login"); }}
+            onClick={() => setChangingEmail((value) => !value)}
             className="text-zinc-500 hover:text-white"
           >
             Use different email
