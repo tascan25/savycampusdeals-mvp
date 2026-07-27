@@ -38,7 +38,7 @@ function ImageUpload({ label, value, onChange, testId }) {
 }
 
 export default function Verify() {
-  const { user, refreshUser, setUser } = useAuth();
+  const { user, setUser } = useAuth();
   const nav = useNavigate();
   const [f, setF] = useState({
     college_id_image: "", selfie_image: "",
@@ -152,9 +152,9 @@ export default function Verify() {
     }
     setLoading(true);
     try {
-      await api.post("/verification/submit", f);
-      setSubmitted(true);
-      await refreshUser();
+      const { data } = await api.post("/verification/submit", f);
+      setUser(data.user);
+      setSubmitted(data.user.verification_status !== "approved");
       toast.success(isCollegeEmail ? "Verification complete." : "Verification submitted for review.");
     } catch (e) {
       const message = formatApiError(e.response?.data?.detail);
