@@ -182,7 +182,14 @@ export default function Verify() {
 
         <form onSubmit={onSubmit} className="mt-10 glass-heavy rounded-3xl p-8 grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className={`md:col-span-2 rounded-2xl p-4 text-sm ${isCollegeEmail ? "bg-emerald-500/10 border border-emerald-400/30 text-emerald-100" : "bg-amber-500/10 border border-amber-400/30 text-amber-100"}`}>
-            {isCollegeEmail ? <><span className="font-semibold">College email verification:</span> no document uploads are needed.</> : <><span className="font-semibold">Documents required:</span> both uploads are required for manual review.</>}
+            {isCollegeEmail ? (
+              <>
+                <span className="font-semibold">College email verification:</span>{" "}
+                no document uploads are needed. Complete and submit the academic
+                details below, including your Student ID / Roll Number, to get
+                verified.
+              </>
+            ) : <><span className="font-semibold">Documents required:</span> both uploads are required for manual review.</>}
           </div>
           {!isCollegeEmail && <>
             <ImageUpload label="College ID card image *" value={f.college_id_image} onChange={(v) => update("college_id_image", v)} testId="verify-collegeid-input"/>
