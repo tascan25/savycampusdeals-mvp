@@ -8,6 +8,8 @@ load_dotenv(ROOT_DIR / ".env")
 import os
 import io
 import base64
+import hashlib
+import hmac
 import secrets
 import logging
 import asyncio
@@ -347,6 +349,52 @@ def generate_qr_data_uri(payload: str) -> str:
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def create_public_pass_token(user: dict) -> str:
+    """Create a compact signed token without exposing student details."""
+    user_id = user.get("_id")
+    if not isinstance(user_id, ObjectId):
+        raise ValueError("A valid student ID is required")
+    encoded_id = base64.urlsafe_b64encode(user_id.binary).decode().rstrip("=")
+    signature = hmac.new(
+        JWT_SECRET.encode(),
+        f"student-pass:{encoded_id}".encode(),
+        hashlib.sha256,
+    ).digest()[:16]
+    encoded_signature = base64.urlsafe_b64encode(signature).decode().rstrip("=")
+    return f"{encoded_id}.{encoded_signature}"
+
+
+def decode_public_pass_token(token: str) -> ObjectId:
+    """Validate a public pass token and return its bound user ID."""
+    try:
+        encoded_id, encoded_signature = token.split(".", 1)
+        expected_signature = hmac.new(
+            JWT_SECRET.encode(),
+            f"student-pass:{encoded_id}".encode(),
+            hashlib.sha256,
+        ).digest()[:16]
+        supplied_signature = base64.urlsafe_b64decode(
+            encoded_signature + "=" * (-len(encoded_signature) % 4)
+        )
+        if (
+            base64.urlsafe_b64encode(supplied_signature).decode().rstrip("=")
+            != encoded_signature
+        ):
+            raise ValueError
+        if not hmac.compare_digest(expected_signature, supplied_signature):
+            raise ValueError
+        raw_id = base64.urlsafe_b64decode(
+            encoded_id + "=" * (-len(encoded_id) % 4)
+        )
+        if base64.urlsafe_b64encode(raw_id).decode().rstrip("=") != encoded_id:
+            raise ValueError
+        if len(raw_id) != 12:
+            raise ValueError
+        return ObjectId(raw_id)
+    except Exception:
+        raise HTTPException(404, "Student pass not found") from None
 
 
 PASSWORD_RE = re.compile(r"^(?=.*[A-Z])(?=.*[^A-Za-z0-9]).{8,}$")
@@ -2214,10 +2262,12 @@ async def verification_status(user=Depends(get_current_user)):
 # -----------------------------
 @api.get("/student-card")
 async def student_card(user=Depends(get_current_user)):
-    if user.get("verification_status") != "approved":
+    if effective_verification_status(user) != "approved":
         raise HTTPException(403, "You must be verified to access your student card")
-    # Encode as URL so any phone camera scanning the QR opens our /scan page directly.
-    payload = f"{FRONTEND_URL}/scan?s={user.get('student_number','')}"
+    # Public pass verification is deliberately separate from the authenticated
+    # restaurant scanner used for coupon redemption.
+    pass_token = create_public_pass_token(user)
+    payload = f"{FRONTEND_URL}/verify-pass?t={pass_token}"
     qr = generate_qr_data_uri(payload)
     return {
         "name": user.get("name", ""),
@@ -2233,6 +2283,30 @@ async def student_card(user=Depends(get_current_user)):
             else None
         ),
         "qr_data_uri": qr,
+    }
+
+
+@api.get("/public/student-pass")
+async def public_student_pass(
+    token: str = Query(..., min_length=10, max_length=200)
+):
+    """Return only the limited identity fields safe for a public QR check."""
+    user_id = decode_public_pass_token(token)
+    user = await db.users.find_one({"_id": user_id, "role": "student"})
+    if not user or not user.get("student_number"):
+        raise HTTPException(404, "Student pass not found")
+
+    status = effective_verification_status(user)
+    expiry = user.get("verification_expiry")
+    return {
+        "verified": status == "approved",
+        "status": status,
+        "name": user.get("name", ""),
+        "college": user.get("college", ""),
+        "course": user.get("course", ""),
+        "year": user.get("year", ""),
+        "student_number": user.get("student_number", ""),
+        "expiry": expiry.isoformat() if expiry else None,
     }
 
 

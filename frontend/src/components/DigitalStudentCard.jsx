@@ -34,13 +34,13 @@ export default function DigitalStudentCard({ card }) {
 
         <div className="relative flex items-start justify-between">
           <div>
-            <div className="text-[10px] uppercase tracking-[0.3em] text-white/60">SavyCampusDeals</div>
+            <div className="text-[10px] tracking-[0.3em] text-white/60">SAVVYCAMPUSDEALS</div>
             <div className="font-display text-2xl font-extrabold mt-1 flex items-center gap-2">
               Student Pass
               <Sparkles size={16} className="text-emerald-300"/>
             </div>
           </div>
-          <div className="flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2.5 py-1 border border-emerald-400/30 text-emerald-300 text-[11px] font-semibold" data-testid="student-card-verified-badge">
+          <div className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-emerald-500/15 px-2.5 py-1 border border-emerald-400/30 text-emerald-300 text-[11px] font-semibold" data-testid="student-card-verified-badge">
             <BadgeCheck size={14} />
             Verified
           </div>

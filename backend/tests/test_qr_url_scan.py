@@ -5,6 +5,7 @@ import os
 import re
 import secrets
 import time
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 import requests
@@ -117,7 +118,19 @@ def test_student_card_qr_is_url(student):
     assert qr.startswith("data:image/png;base64,")
     if HAS_ZBAR:
         decoded = _decode_qr(qr)
-        assert decoded == f"{FRONTEND_URL}/scan?s={student_number}", decoded
+        parsed = urlparse(decoded)
+        token = parse_qs(parsed.query).get("t", [""])[0]
+        assert f"{parsed.scheme}://{parsed.netloc}{parsed.path}" == f"{FRONTEND_URL}/verify-pass"
+        assert token, decoded
+        public = api.get(
+            f"{BASE_URL}/api/public/student-pass",
+            params={"token": token},
+        )
+        assert public.status_code == 200, public.text
+        public_body = public.json()
+        assert public_body["verified"] is True
+        assert public_body["student_number"] == student_number
+        assert "email" not in public_body
 
 
 def test_claim_coupon_qr_is_url(api, admin_token, student):

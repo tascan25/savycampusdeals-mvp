@@ -1,21 +1,17 @@
-import React, { useRef, useState } from "react";
+import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { ArrowRight, Download, Loader2 } from "lucide-react";
-import html2canvas from "html2canvas";
 import { toast } from "sonner";
 import Navbar from "@/components/Navbar";
 import DigitalStudentCard from "@/components/DigitalStudentCard";
 import api from "@/lib/api";
+import { createStudentPassPng } from "@/lib/studentPassPng";
 import { useAuth } from "@/context/AuthContext";
-
-const EXPORT_CARD_WIDTH = 432;
-const EXPORT_CARD_HEIGHT = Math.round(EXPORT_CARD_WIDTH / 1.586);
 
 export default function StudentCard() {
   const { user } = useAuth();
-  const cardRef = useRef(null);
   const [downloading, setDownloading] = useState(false);
 
   const { data, isLoading } = useQuery({
@@ -25,55 +21,11 @@ export default function StudentCard() {
   });
 
   const download = async () => {
-    const cardSurface = cardRef.current?.querySelector(
-      "[data-student-card-surface]"
-    );
-    if (!cardSurface) return;
+    if (!data) return;
     setDownloading(true);
     try {
-      if (document.fonts?.ready) await document.fonts.ready;
-      const images = Array.from(cardSurface.querySelectorAll("img"));
-      await Promise.all(images.map(async (image) => {
-        if (!image.complete) {
-          await new Promise((resolve) => {
-            image.addEventListener("load", resolve, { once: true });
-            image.addEventListener("error", resolve, { once: true });
-          });
-        }
-        if (image.decode) await image.decode().catch(() => {});
-      }));
-
-      const canvas = await html2canvas(cardSurface, {
-        backgroundColor: null,
-        scale: 3,
-        width: EXPORT_CARD_WIDTH,
-        height: EXPORT_CARD_HEIGHT,
-        windowWidth: Math.max(
-          document.documentElement.clientWidth,
-          EXPORT_CARD_WIDTH
-        ),
-        useCORS: true,
-        allowTaint: true,
-        logging: false,
-        onclone: (clonedDocument) => {
-          const surface = clonedDocument.querySelector("[data-student-card-surface]");
-          if (surface) {
-            surface.style.width = `${EXPORT_CARD_WIDTH}px`;
-            surface.style.minWidth = `${EXPORT_CARD_WIDTH}px`;
-            surface.style.maxWidth = `${EXPORT_CARD_WIDTH}px`;
-            surface.style.height = `${EXPORT_CARD_HEIGHT}px`;
-            surface.style.aspectRatio = "auto";
-            surface.style.margin = "0";
-            surface.style.transform = "none";
-            surface.style.transformStyle = "flat";
-            surface.style.boxShadow = "none";
-            surface.style.animation = "none";
-            surface.classList.remove("holo-shine");
-            surface.querySelector("[data-card-grain]")?.remove();
-          }
-        },
-      });
-      const url = canvas.toDataURL("image/png");
+      const blob = await createStudentPassPng(data);
+      const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
       const safeName = (data?.name || "student").replace(/[^a-z0-9]/gi, "_");
@@ -81,6 +33,7 @@ export default function StudentCard() {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
       toast.success("Card downloaded — save it to your gallery!");
     } catch (e) {
       toast.error("Couldn't download. Please try again.");
@@ -119,7 +72,7 @@ export default function StudentCard() {
           {isLoading ? (
             <div className="rounded-3xl w-full max-w-md mx-auto aspect-[1.586/1] bg-white/5 animate-pulse"/>
           ) : (
-            <div ref={cardRef} className="w-full max-w-md mx-auto p-2">
+            <div className="w-full max-w-md mx-auto p-2">
               <DigitalStudentCard card={data}/>
             </div>
           )}
