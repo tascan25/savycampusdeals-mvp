@@ -193,7 +193,13 @@ export default function Verify() {
             { k: "college_name", label: "College name", required: true },
             { k: "student_id_number", label: "Student ID / Roll Number", required: true },
             { k: "course", label: "Course (e.g. B.Tech CSE)", required: true },
-            { k: "year", label: "Year (e.g. 3rd)", required: true },
+            {
+              k: "year",
+              label: "Year of study",
+              placeholder: "e.g. 1st year",
+              helper: "Enter as 1st year, 2nd year, 3rd year, etc.",
+              required: true,
+            },
           ].map((field) => (
             <div key={field.k}>
               <label className="text-xs uppercase tracking-widest text-zinc-500">{field.label}</label>
@@ -201,9 +207,15 @@ export default function Verify() {
                 data-testid={`verify-${field.k.replace(/_/g,'-')}-input`}
                 required={field.required}
                 value={f[field.k]}
+                placeholder={field.placeholder}
                 onChange={(e) => update(field.k, e.target.value)}
                 className="mt-2 w-full rounded-xl bg-white/5 border border-white/10 px-4 py-3 text-white focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/40 focus:outline-none"
               />
+              {field.helper && (
+                <p className="mt-2 text-xs leading-relaxed text-zinc-500">
+                  {field.helper}
+                </p>
+              )}
             </div>
           ))}
 

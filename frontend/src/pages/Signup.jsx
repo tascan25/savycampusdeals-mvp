@@ -238,7 +238,13 @@ export default function Signup() {
           {[
             { k: "college", label: "College", type: "text" },
             { k: "course", label: "Course", type: "text" },
-            { k: "year", label: "Year", type: "text" },
+            {
+              k: "year",
+              label: "Year of study",
+              type: "text",
+              placeholder: "e.g. 1st year",
+              helper: "Enter as 1st year, 2nd year, 3rd year, etc.",
+            },
             { k: "referral_code", label: "Referral code (optional)", type: "text" },
           ].map((field) => (
             <div key={field.k}>
@@ -246,10 +252,16 @@ export default function Signup() {
               <input
                 data-testid={`signup-${field.k}-input`}
                 type={field.type}
+                placeholder={field.placeholder}
                 value={f[field.k]}
                 onChange={update(field.k)}
-                className="mt-2 w-full rounded-xl bg-white/5 border border-white/10 px-4 py-3 text-white focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/40 focus:outline-none transition-colors"
+                className="mt-2 w-full rounded-xl bg-white/5 border border-white/10 px-4 py-3 text-white placeholder:text-zinc-600 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/40 focus:outline-none transition-colors"
               />
+              {field.helper && (
+                <p className="mt-2 text-xs leading-relaxed text-zinc-500">
+                  {field.helper}
+                </p>
+              )}
             </div>
           ))}
 
