@@ -10,6 +10,9 @@ import DigitalStudentCard from "@/components/DigitalStudentCard";
 import api from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 
+const EXPORT_CARD_WIDTH = 432;
+const EXPORT_CARD_HEIGHT = Math.round(EXPORT_CARD_WIDTH / 1.586);
+
 export default function StudentCard() {
   const { user } = useAuth();
   const cardRef = useRef(null);
@@ -22,11 +25,14 @@ export default function StudentCard() {
   });
 
   const download = async () => {
-    if (!cardRef.current) return;
+    const cardSurface = cardRef.current?.querySelector(
+      "[data-student-card-surface]"
+    );
+    if (!cardSurface) return;
     setDownloading(true);
     try {
       if (document.fonts?.ready) await document.fonts.ready;
-      const images = Array.from(cardRef.current.querySelectorAll("img"));
+      const images = Array.from(cardSurface.querySelectorAll("img"));
       await Promise.all(images.map(async (image) => {
         if (!image.complete) {
           await new Promise((resolve) => {
@@ -37,17 +43,33 @@ export default function StudentCard() {
         if (image.decode) await image.decode().catch(() => {});
       }));
 
-      const canvas = await html2canvas(cardRef.current, {
+      const canvas = await html2canvas(cardSurface, {
         backgroundColor: null,
         scale: 3,
+        width: EXPORT_CARD_WIDTH,
+        height: EXPORT_CARD_HEIGHT,
+        windowWidth: Math.max(
+          document.documentElement.clientWidth,
+          EXPORT_CARD_WIDTH
+        ),
         useCORS: true,
         allowTaint: true,
         logging: false,
         onclone: (clonedDocument) => {
           const surface = clonedDocument.querySelector("[data-student-card-surface]");
           if (surface) {
+            surface.style.width = `${EXPORT_CARD_WIDTH}px`;
+            surface.style.minWidth = `${EXPORT_CARD_WIDTH}px`;
+            surface.style.maxWidth = `${EXPORT_CARD_WIDTH}px`;
+            surface.style.height = `${EXPORT_CARD_HEIGHT}px`;
+            surface.style.aspectRatio = "auto";
+            surface.style.margin = "0";
             surface.style.transform = "none";
             surface.style.transformStyle = "flat";
+            surface.style.boxShadow = "none";
+            surface.style.animation = "none";
+            surface.classList.remove("holo-shine");
+            surface.querySelector("[data-card-grain]")?.remove();
           }
         },
       });
