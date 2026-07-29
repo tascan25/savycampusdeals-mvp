@@ -15,6 +15,14 @@ const STATUS_COLORS = {
   expired: "#71717a",
 };
 
+const USER_STATUS = {
+  not_submitted: { label: "Not submitted", color: "#71717a" },
+  pending: { label: "Pending", color: "#fbbf24" },
+  approved: { label: "Approved", color: "#34d399" },
+  rejected: { label: "Rejected", color: "#fb7185" },
+  expired: { label: "Expired", color: "#fb923c" },
+};
+
 const indiaDate = (date) => {
   const parts = new Intl.DateTimeFormat("en-GB", {
     day: "2-digit",
@@ -85,6 +93,12 @@ export default function AdminAnalyticsPage() {
   const collegeData = analytics.data?.college_registrations || [];
   const trendData = analytics.data?.trend || [];
   const statusData = (analytics.data?.redemption_status || []).filter((item) => item.count > 0);
+  const userStatusData = (analytics.data?.user_status || [])
+    .filter((item) => item.count > 0)
+    .map((item) => ({
+      ...item,
+      label: USER_STATUS[item.status]?.label || item.status,
+    }));
   const funnel = analytics.data?.verification_funnel;
   const funnelMax = Math.max(1, funnel?.registered || 0);
   const invalidRange = Boolean(dateFrom && dateTo && dateFrom > dateTo);
@@ -226,7 +240,7 @@ export default function AdminAnalyticsPage() {
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 className="font-display text-xl font-bold">Registrations by college</h2>
-              <p className="mt-1 text-sm text-zinc-500">Leading colleges among students registered in this period.</p>
+              <p className="mt-1 text-sm text-zinc-500">Common spelling and campus-name variants are grouped together.</p>
             </div>
             <School className="shrink-0 text-indigo-300" size={20} />
           </div>
@@ -284,6 +298,35 @@ export default function AdminAnalyticsPage() {
                 </div>
               </div>
             ))}
+          </div>
+
+          <div className="mt-9 border-t border-white/[0.07] pt-6">
+            <h3 className="font-display font-bold">User verification status</h3>
+            <p className="mt-1 text-xs text-zinc-500">Current verification status of all student accounts.</p>
+            <div className="mt-4 h-48" role="img" aria-label="Donut chart of student verification statuses">
+              {analytics.isLoading ? (
+                <div className="grid h-full place-items-center"><Loader2 className="animate-spin text-indigo-300" /></div>
+              ) : userStatusData.length ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={userStatusData} dataKey="count" nameKey="label" innerRadius={48} outerRadius={72} paddingAngle={3}>
+                      {userStatusData.map((item) => (
+                        <Cell key={item.status} fill={USER_STATUS[item.status]?.color || "#71717a"} />
+                      ))}
+                    </Pie>
+                    <Tooltip contentStyle={tooltipStyle} />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : <EmptyChart message="No student accounts were found." />}
+            </div>
+            <div className="mt-2 flex flex-wrap justify-center gap-x-4 gap-y-2">
+              {(analytics.data?.user_status || []).map((item) => (
+                <div key={item.status} className="flex items-center gap-1.5 text-xs text-zinc-400">
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: USER_STATUS[item.status]?.color }} />
+                  {USER_STATUS[item.status]?.label || item.status} · {item.count}
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="mt-9 border-t border-white/[0.07] pt-6">

@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BarChart3, CheckCircle2, ChevronLeft, ChevronRight, CircleUserRound, Clock3,
   FileText, Handshake, LayoutDashboard, Loader2, LogOut, Menu, Search, Settings,
-  ShieldCheck, Store, Ticket, TicketCheck, Users, XCircle,
+  ShieldCheck, Store, Ticket, TicketCheck, UserRoundPlus, Users, XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import api, { formatApiError } from "@/lib/api";
@@ -16,6 +16,7 @@ import AdminPartnersPage from "@/pages/admin/AdminPartnersPage";
 import AdminRedemptionsPage from "@/pages/admin/AdminRedemptionsPage";
 
 const AdminAnalyticsPage = lazy(() => import("@/pages/admin/AdminAnalyticsPage"));
+const AdminReferralsPage = lazy(() => import("@/pages/admin/AdminReferralsPage"));
 
 const navItems = [
   { to: "/admin", label: "Dashboard", icon: LayoutDashboard },
@@ -23,6 +24,7 @@ const navItems = [
   { to: "/admin/pending-verifications", label: "Pending verification", icon: ShieldCheck },
   { to: "/admin/partners", label: "Outlet partners", icon: Handshake },
   { to: "/admin/redemptions", label: "Redemptions", icon: TicketCheck },
+  { to: "/admin/referrals", label: "Referrals", icon: UserRoundPlus },
   { to: "/admin/brands", label: "Brands", icon: Store, placeholder: true },
   { to: "/admin/coupons", label: "Coupons", icon: Ticket, placeholder: true },
   { to: "/admin/analytics", label: "Analytics", icon: BarChart3 },
@@ -105,6 +107,7 @@ function DashboardPage() {
   const stats = useQuery({ queryKey: ["admin-dashboard"], queryFn: async () => (await api.get("/admin/dashboard")).data });
   const cards = [
     ["total_users", "Total users", Users, "text-indigo-300"], ["verified_students", "Verified students", CheckCircle2, "text-emerald-300"],
+    ["not_submitted_students", "Verification not submitted", FileText, "text-zinc-300"],
     ["pending_verifications", "Pending requests", Clock3, "text-amber-300"], ["rejected_verifications", "Rejected verifications", XCircle, "text-rose-300"],
     ["today_signups", "Today's signups", CircleUserRound, "text-sky-300"], ["total_brands", "Total brands", Store, "text-violet-300"],
     ["outlet_partners", "Active outlet partners", Handshake, "text-cyan-300"], ["outlet_redemptions", "Outlet redemptions", TicketCheck, "text-emerald-300"],
@@ -176,6 +179,7 @@ export default function AdminPortal() {
   else if (pathname.startsWith("/admin/pending-verifications")) page = <PendingPage openUser={(id) => openUser(id)} review={(request) => openUser(request.user_id, request.id)} />;
   else if (pathname.startsWith("/admin/partners")) page = <AdminPartnersPage />;
   else if (pathname.startsWith("/admin/redemptions")) page = <AdminRedemptionsPage />;
+  else if (pathname.startsWith("/admin/referrals")) page = <Suspense fallback={<div className="min-h-[420px] grid place-items-center"><Loader2 className="animate-spin text-violet-300" /></div>}><AdminReferralsPage openUser={openUser} /></Suspense>;
   else if (pathname.startsWith("/admin/analytics")) page = <Suspense fallback={<div className="min-h-[420px] grid place-items-center"><Loader2 className="animate-spin text-indigo-300" /></div>}><AdminAnalyticsPage /></Suspense>;
   else { const item = navItems.find((entry) => entry.placeholder && pathname.startsWith(entry.to)); if (item) page = <PlaceholderPage title={item.label} />; }
   return <div className="min-h-screen bg-[#050505] text-white md:flex"><AdminSidebar pathname={pathname} mobileOpen={mobileOpen} onNavigate={() => setMobileOpen(false)} /><main className="min-w-0 flex-1"><div className="border-b border-white/10 px-5 py-4 md:hidden"><button onClick={() => setMobileOpen(!mobileOpen)} className="inline-flex items-center gap-2 text-sm text-zinc-300"><Menu size={18} /> Menu</button></div><div className="mx-auto max-w-7xl p-5 md:p-9">{page}</div></main><UserDialog userId={userId} onClose={() => setUserId(null)} selectedVerification={selectedVerification} onReview={review} /><ReviewDialog action={reviewAction} onClose={() => { setReviewAction(null); setUserId(null); }} /></div>;

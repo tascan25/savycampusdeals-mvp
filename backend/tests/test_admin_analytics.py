@@ -75,6 +75,16 @@ def test_admin_analytics_returns_college_and_activity_data(admin_headers):
         "redeemed",
         "expired",
     ]
+    assert [item["status"] for item in data["user_status"]] == [
+        "not_submitted",
+        "pending",
+        "approved",
+        "rejected",
+        "expired",
+    ]
+    assert sum(item["count"] for item in data["user_status"]) == (
+        data["summary"]["total_students"]
+    )
 
 
 def test_admin_analytics_rejects_unbounded_custom_range(admin_headers):

@@ -1687,25 +1687,393 @@ async def admin_dashboard(admin=Depends(get_admin_user)):
     """Summary data for the admin home. Counts use the source collections only."""
     today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     student_query = {"role": "student"}
-    total_users, verified_students, pending, rejected, today_signups, brands, partners, redeemed = await asyncio.gather(
+    not_submitted_query = {
+        **student_query,
+        "verification_status": {
+            "$in": ["not_submitted", "unverified", None],
+        },
+    }
+    (
+        total_users,
+        verified_students,
+        not_submitted_students,
+        pending,
+        rejected,
+        today_signups,
+        brands,
+        partners,
+        redeemed,
+    ) = await asyncio.gather(
         db.users.count_documents(student_query),
-        db.users.count_documents({**student_query, "verification_status": "approved"}),
+        db.users.count_documents(
+            {**student_query, "verification_status": "approved"}
+        ),
+        db.users.count_documents(not_submitted_query),
         db.verifications.count_documents({"status": "pending"}),
         db.verifications.count_documents({"status": "rejected"}),
-        db.users.count_documents({**student_query, "created_at": {"$gte": today}}),
+        db.users.count_documents(
+            {**student_query, "created_at": {"$gte": today}}
+        ),
         db.offers.distinct("brand"),
-        db.users.count_documents({"role": "outlet_partner", "active": {"$ne": False}}),
-        db.coupons.count_documents({"outlet_id": {"$ne": None}, "status": "redeemed"}),
+        db.users.count_documents(
+            {"role": "outlet_partner", "active": {"$ne": False}}
+        ),
+        db.coupons.count_documents(
+            {"outlet_id": {"$ne": None}, "status": "redeemed"}
+        ),
     )
     return {
         "total_users": total_users,
         "verified_students": verified_students,
+        "not_submitted_students": not_submitted_students,
         "pending_verifications": pending,
         "rejected_verifications": rejected,
         "today_signups": today_signups,
         "total_brands": len(brands),
         "outlet_partners": partners,
         "outlet_redemptions": redeemed,
+    }
+
+
+@api.get("/admin/referrals")
+async def admin_referrals(
+    q: Optional[str] = Query(None, max_length=100),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(12, ge=1, le=50),
+    admin=Depends(get_admin_user),
+):
+    """Referral leaderboard and student-level referral history."""
+    search_match = None
+    if q and q.strip():
+        pattern = re.escape(q.strip())
+        search_match = {
+            "$or": [
+                {"name": {"$regex": pattern, "$options": "i"}},
+                {"email": {"$regex": pattern, "$options": "i"}},
+                {"college": {"$regex": pattern, "$options": "i"}},
+                {"referral_code": {"$regex": pattern, "$options": "i"}},
+            ]
+        }
+
+    leaderboard_pipeline: list[dict] = [
+        {"$match": {"referrer_id": {"$ne": None}}},
+        {
+            "$group": {
+                "_id": "$referrer_id",
+                "fallback_email": {"$first": "$referrer_email"},
+                "referral_count": {"$sum": 1},
+                "points_awarded": {
+                    "$sum": {"$ifNull": ["$points_awarded", 0]}
+                },
+                "latest_referral": {"$max": "$created_at"},
+            }
+        },
+        {
+            "$lookup": {
+                "from": "users",
+                "localField": "_id",
+                "foreignField": "_id",
+                "as": "referrer",
+            }
+        },
+        {
+            "$unwind": {
+                "path": "$referrer",
+                "preserveNullAndEmptyArrays": True,
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "referrer_id": "$_id",
+                "name": {"$ifNull": ["$referrer.name", "Deleted student"]},
+                "email": {
+                    "$ifNull": ["$referrer.email", "$fallback_email"]
+                },
+                "college": {"$ifNull": ["$referrer.college", ""]},
+                "referral_code": {
+                    "$ifNull": ["$referrer.referral_code", ""]
+                },
+                "account_exists": {
+                    "$ne": [
+                        {"$ifNull": ["$referrer._id", None]},
+                        None,
+                    ]
+                },
+                "reward_points": {
+                    "$ifNull": ["$referrer.reward_points", 0]
+                },
+                "referral_count": 1,
+                "points_awarded": 1,
+                "latest_referral": 1,
+            }
+        },
+    ]
+    if search_match:
+        leaderboard_pipeline.append({"$match": search_match})
+    leaderboard_pipeline.extend(
+        [
+            {
+                "$sort": {
+                    "referral_count": -1,
+                    "latest_referral": -1,
+                    "name": 1,
+                }
+            },
+            {
+                "$facet": {
+                    "metadata": [{"$count": "total"}],
+                    "items": [
+                        {"$skip": (page - 1) * page_size},
+                        {"$limit": page_size},
+                    ],
+                }
+            },
+        ]
+    )
+
+    (
+        leaderboard_rows,
+        total_referrals,
+        referrer_ids,
+        awarded_rows,
+        verified_referred,
+        top_rows,
+    ) = await asyncio.gather(
+        db.referrals.aggregate(leaderboard_pipeline).to_list(1),
+        db.referrals.count_documents({}),
+        db.referrals.distinct("referrer_id", {"referrer_id": {"$ne": None}}),
+        db.referrals.aggregate(
+            [
+                {
+                    "$group": {
+                        "_id": None,
+                        "points": {
+                            "$sum": {"$ifNull": ["$points_awarded", 0]}
+                        },
+                    }
+                }
+            ]
+        ).to_list(1),
+        db.users.count_documents(
+            {
+                "role": "student",
+                "referrer_id": {"$ne": None},
+                "verification_status": "approved",
+            }
+        ),
+        db.referrals.aggregate(
+            [
+                {"$match": {"referrer_id": {"$ne": None}}},
+                {
+                    "$group": {
+                        "_id": "$referrer_id",
+                        "fallback_email": {"$first": "$referrer_email"},
+                        "referral_count": {"$sum": 1},
+                    }
+                },
+                {"$sort": {"referral_count": -1}},
+                {"$limit": 1},
+                {
+                    "$lookup": {
+                        "from": "users",
+                        "localField": "_id",
+                        "foreignField": "_id",
+                        "as": "referrer",
+                    }
+                },
+                {
+                    "$unwind": {
+                        "path": "$referrer",
+                        "preserveNullAndEmptyArrays": True,
+                    }
+                },
+                {
+                    "$project": {
+                        "_id": 0,
+                        "name": {
+                            "$ifNull": [
+                                "$referrer.name",
+                                "Deleted student",
+                            ]
+                        },
+                        "email": {
+                            "$ifNull": [
+                                "$referrer.email",
+                                "$fallback_email",
+                            ]
+                        },
+                        "referral_count": 1,
+                    }
+                },
+            ]
+        ).to_list(1),
+    )
+
+    facet = leaderboard_rows[0] if leaderboard_rows else {}
+    referrer_rows = facet.get("items", [])
+    total_referrers = (
+        facet.get("metadata", [{}])[0].get("total", 0)
+        if facet.get("metadata")
+        else 0
+    )
+    page_referrer_ids = [
+        row["referrer_id"]
+        for row in referrer_rows
+        if row.get("referrer_id")
+    ]
+
+    referrals_by_referrer: dict[ObjectId, dict] = {}
+    if page_referrer_ids:
+        detail_rows = await db.referrals.aggregate(
+            [
+                {"$match": {"referrer_id": {"$in": page_referrer_ids}}},
+                {"$sort": {"created_at": -1}},
+                {
+                    "$lookup": {
+                        "from": "users",
+                        "localField": "referred_id",
+                        "foreignField": "_id",
+                        "as": "student",
+                    }
+                },
+                {
+                    "$unwind": {
+                        "path": "$student",
+                        "preserveNullAndEmptyArrays": True,
+                    }
+                },
+                {
+                    "$group": {
+                        "_id": "$referrer_id",
+                        "verified_referrals": {
+                            "$sum": {
+                                "$cond": [
+                                    {
+                                        "$eq": [
+                                            "$student.verification_status",
+                                            "approved",
+                                        ]
+                                    },
+                                    1,
+                                    0,
+                                ]
+                            }
+                        },
+                        "students": {
+                            "$push": {
+                                "id": "$referred_id",
+                                "account_exists": {
+                                    "$ne": [
+                                        {
+                                            "$ifNull": [
+                                                "$student._id",
+                                                None,
+                                            ]
+                                        },
+                                        None,
+                                    ]
+                                },
+                                "name": {
+                                    "$ifNull": [
+                                        "$student.name",
+                                        "Deleted student",
+                                    ]
+                                },
+                                "email": {
+                                    "$ifNull": [
+                                        "$student.email",
+                                        "$referred_email",
+                                    ]
+                                },
+                                "college": {
+                                    "$ifNull": ["$student.college", ""]
+                                },
+                                "verification_status": {
+                                    "$ifNull": [
+                                        "$student.verification_status",
+                                        "deleted",
+                                    ]
+                                },
+                                "verification_expiry": (
+                                    "$student.verification_expiry"
+                                ),
+                                "points_awarded": {
+                                    "$ifNull": ["$points_awarded", 0]
+                                },
+                                "joined_at": "$created_at",
+                            }
+                        },
+                    }
+                },
+                {
+                    "$project": {
+                        "verified_referrals": 1,
+                        "students": {"$slice": ["$students", 50]},
+                    }
+                },
+            ]
+        ).to_list(page_size)
+        referrals_by_referrer = {row["_id"]: row for row in detail_rows}
+
+    items = []
+    for row in referrer_rows:
+        detail = referrals_by_referrer.get(row.get("referrer_id"), {})
+        students = []
+        for student in detail.get("students", []):
+            status = student.get("verification_status", "not_submitted")
+            if status == "unverified":
+                status = "not_submitted"
+            if status == "approved" and verification_has_expired(student):
+                status = "expired"
+            students.append(
+                {
+                    "id": (
+                        str(student["id"])
+                        if student.get("id")
+                        else None
+                    ),
+                    "account_exists": student.get(
+                        "account_exists",
+                        False,
+                    ),
+                    "name": student.get("name", "Deleted student"),
+                    "email": student.get("email", ""),
+                    "college": student.get("college", ""),
+                    "verification_status": status,
+                    "points_awarded": student.get("points_awarded", 0),
+                    "joined_at": student.get("joined_at"),
+                }
+            )
+        items.append(
+            {
+                **row,
+                "referrer_id": str(row["referrer_id"]),
+                "verified_referrals": detail.get(
+                    "verified_referrals",
+                    0,
+                ),
+                "referred_students": students,
+                "referrals_shown": len(students),
+            }
+        )
+
+    return {
+        "summary": {
+            "total_referrals": total_referrals,
+            "active_referrers": len(
+                [referrer_id for referrer_id in referrer_ids if referrer_id]
+            ),
+            "verified_referred": verified_referred,
+            "points_awarded": (
+                awarded_rows[0].get("points", 0) if awarded_rows else 0
+            ),
+            "top_referrer": top_rows[0] if top_rows else None,
+        },
+        "items": items,
+        "page": page,
+        "page_size": page_size,
+        "total": total_referrers,
     }
 
 
@@ -1873,6 +2241,29 @@ async def _analytics_daily_counts(collection, query: dict, date_field: str) -> d
     return {row["_id"]: row["count"] for row in rows if row.get("_id")}
 
 
+def canonical_college_name(value: str) -> str:
+    """Return a stable display name for conservative, known college aliases."""
+    cleaned = re.sub(r"[^a-z0-9&]+", " ", (value or "").casefold()).strip()
+    cleaned = re.sub(
+        r"\b(?:univeristy|unversity|univercity)\b",
+        "university",
+        cleaned,
+    )
+    cleaned = re.sub(r"\s+", " ", cleaned)
+
+    # Keep aliases explicit: broad fuzzy matching can merge different colleges.
+    if re.match(r"^a?amity university(?:\s+.*)?$", cleaned):
+        return "Amity University"
+    if cleaned in {"amity", "amity noida", "aamity"}:
+        return "Amity University"
+
+    acronyms = {"du", "iiit", "iit", "ipec", "kiet", "nit"}
+    return " ".join(
+        word.upper() if word in acronyms else word.title()
+        for word in cleaned.split()
+    )
+
+
 @api.get("/admin/analytics")
 async def admin_analytics(
     date_from: Optional[str] = Query(None),
@@ -1933,6 +2324,7 @@ async def admin_analytics(
         college_rows,
         college_missing,
         status_rows,
+        user_status_rows,
         issued_by_outlet,
         redeemed_by_outlet,
         outlets,
@@ -1977,9 +2369,8 @@ async def admin_analytics(
                     }
                 },
                 {"$sort": {"registrations": -1, "college": 1}},
-                {"$limit": 12},
             ]
-        ).to_list(12),
+        ).to_list(2000),
         db.users.count_documents(
             {
                 **registration_query,
@@ -1996,6 +2387,64 @@ async def admin_analytics(
                 {
                     "$group": {
                         "_id": {"$ifNull": ["$status", "unknown"]},
+                        "count": {"$sum": 1},
+                    }
+                },
+            ]
+        ).to_list(10),
+        db.users.aggregate(
+            [
+                {"$match": student_query},
+                {
+                    "$project": {
+                        "status": {
+                            "$cond": [
+                                {
+                                    "$and": [
+                                        {
+                                            "$eq": [
+                                                {
+                                                    "$ifNull": [
+                                                        "$verification_status",
+                                                        "not_submitted",
+                                                    ]
+                                                },
+                                                "approved",
+                                            ]
+                                        },
+                                        {
+                                            "$ne": [
+                                                {
+                                                    "$ifNull": [
+                                                        "$verification_expiry",
+                                                        None,
+                                                    ]
+                                                },
+                                                None,
+                                            ]
+                                        },
+                                        {
+                                            "$lt": [
+                                                "$verification_expiry",
+                                                datetime.now(timezone.utc),
+                                            ]
+                                        },
+                                    ]
+                                },
+                                "expired",
+                                {
+                                    "$ifNull": [
+                                        "$verification_status",
+                                        "not_submitted",
+                                    ]
+                                },
+                            ]
+                        }
+                    }
+                },
+                {
+                    "$group": {
+                        "_id": "$status",
                         "count": {"$sum": 1},
                     }
                 },
@@ -2051,6 +2500,36 @@ async def admin_analytics(
     status_counts = {
         row["_id"]: row["count"] for row in status_rows if row.get("_id")
     }
+    user_status_counts = {
+        status: 0
+        for status in (
+            "not_submitted",
+            "pending",
+            "approved",
+            "rejected",
+            "expired",
+        )
+    }
+    for row in user_status_rows:
+        status = row.get("_id")
+        if status in {None, "unverified", "not_submitted"}:
+            status = "not_submitted"
+        if status in user_status_counts:
+            user_status_counts[status] += row.get("count", 0)
+
+    grouped_colleges: dict[str, int] = {}
+    for row in college_rows:
+        college = canonical_college_name(row.get("college") or "")
+        if college:
+            grouped_colleges[college] = (
+                grouped_colleges.get(college, 0)
+                + row.get("registrations", 0)
+            )
+    top_colleges = sorted(
+        grouped_colleges.items(),
+        key=lambda item: (-item[1], item[0]),
+    )[:12]
+
     verification_rate = (
         round(verified_students / total_students * 100, 1)
         if total_students
@@ -2078,12 +2557,22 @@ async def admin_analytics(
         },
         "college_registrations": [
             {
-                "college": row.get("college") or "Unnamed college",
-                "registrations": row.get("registrations", 0),
+                "college": college,
+                "registrations": registrations,
             }
-            for row in college_rows
+            for college, registrations in top_colleges
         ],
         "registrations_without_college": college_missing,
+        "user_status": [
+            {"status": status, "count": user_status_counts[status]}
+            for status in (
+                "not_submitted",
+                "pending",
+                "approved",
+                "rejected",
+                "expired",
+            )
+        ],
         "redemption_status": [
             {"status": status, "count": status_counts.get(status, 0)}
             for status in ("active", "redeemed", "expired")
@@ -3651,6 +4140,9 @@ async def on_startup():
             partialFilterExpression={"role": "outlet_partner"},
         )
         await db.verifications.create_index([("status", 1), ("submitted_at", -1)])
+        await db.referrals.create_index(
+            [("referrer_id", 1), ("created_at", -1)]
+        )
         await db.outlet_daily_redemptions.create_index(
             [("user_id", 1), ("outlet_id", 1), ("day", 1)], unique=True
         )
