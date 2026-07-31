@@ -37,7 +37,9 @@ function CouponModal({ coupon, onClose }) {
               className="text-xs rounded-full bg-white/10 hover:bg-white/20 px-3 py-1.5 flex items-center gap-1"
             ><Copy size={12}/> Copy</button>
           </div>
-          <div className="mt-4 text-xs text-zinc-500 text-center">Show this QR at checkout. One-time use.</div>
+          <div className="mt-4 rounded-xl border border-amber-400/25 bg-amber-500/10 p-3 text-xs leading-relaxed text-amber-100 text-center">
+            Ask outlet staff to scan and approve this QR before your bill is closed. Your discount is confirmed only when this coupon shows Redeemed.
+          </div>
         </motion.div>
       </motion.div>
     </AnimatePresence>

@@ -2,21 +2,51 @@ import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { MapPin, Star, Ticket, Utensils } from "lucide-react";
+import { LocateFixed, MapPin, Star, Ticket, Utensils } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import api from "@/lib/api";
 
 export default function Outlets() {
   const [city, setCity] = React.useState("all");
   const [q, setQ] = React.useState("");
+  const [nearbyOnly, setNearbyOnly] = React.useState(false);
+  const [coords, setCoords] = React.useState(null);
+  const [locationState, setLocationState] = React.useState("idle");
+
+  const findLocation = React.useCallback(() => {
+    if (!navigator.geolocation) {
+      setLocationState("unsupported");
+      return;
+    }
+    setLocationState("loading");
+    navigator.geolocation.getCurrentPosition(
+      ({ coords: current }) => {
+        setCoords({ lat: current.latitude, lng: current.longitude });
+        setLocationState("ready");
+      },
+      () => setLocationState("denied"),
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 5 * 60 * 1000 }
+    );
+  }, []);
+
+  React.useEffect(() => {
+    findLocation();
+  }, [findLocation]);
 
   const { data: cities = [] } = useQuery({
     queryKey: ["outlet-cities"],
     queryFn: async () => (await api.get("/outlets/cities")).data,
   });
   const { data: outlets = [], isLoading } = useQuery({
-    queryKey: ["outlets", city, q],
-    queryFn: async () => (await api.get("/outlets", { params: { city, q: q || undefined } })).data,
+    queryKey: ["outlets", city, q, nearbyOnly, coords?.lat, coords?.lng],
+    queryFn: async () => (await api.get("/outlets", { params: {
+      city,
+      q: q || undefined,
+      lat: coords?.lat,
+      lng: coords?.lng,
+      nearby_only: nearbyOnly && Boolean(coords),
+      radius_km: 5,
+    } })).data,
   });
 
   return (
@@ -55,7 +85,30 @@ export default function Outlets() {
               <option key={c} value={c} className="bg-[#0a0a0c]">{c}</option>
             ))}
           </select>
+          <button
+            type="button"
+            data-testid="outlets-nearby-filter"
+            aria-pressed={nearbyOnly}
+            onClick={() => {
+              if (!coords) findLocation();
+              setNearbyOnly((enabled) => !enabled);
+            }}
+            className={`rounded-full border px-4 py-2.5 text-sm inline-flex items-center justify-center gap-2 transition-colors ${
+              nearbyOnly
+                ? "bg-emerald-500/20 border-emerald-400/40 text-emerald-200"
+                : "bg-white/5 border-white/10 text-zinc-300 hover:bg-white/10"
+            }`}
+          >
+            <LocateFixed size={14} className={locationState === "loading" ? "animate-pulse" : ""} />
+            Near me · 5 km
+          </button>
         </div>
+
+        {nearbyOnly && !coords && locationState !== "loading" && (
+          <div className="mt-3 text-sm text-amber-300" data-testid="outlets-location-message">
+            Location access is needed for the Near me filter. Enable it in your browser and try again.
+          </div>
+        )}
 
         <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" data-testid="outlets-grid">
           {isLoading && [...Array(6)].map((_, i) => <div key={i} className="rounded-2xl aspect-[16/12] bg-white/5 animate-pulse" />)}
@@ -78,6 +131,11 @@ export default function Outlets() {
                   <div className="absolute top-3 left-3 flex items-center gap-1.5 glass-heavy rounded-full px-2.5 py-1 text-[10px] uppercase tracking-widest text-white">
                     <MapPin size={10} /> {o.city}
                   </div>
+                  {o.is_nearby && (
+                    <div className="absolute top-12 left-3 flex items-center gap-1.5 rounded-full bg-emerald-500/90 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-widest text-black" data-testid={`outlet-nearby-${o.id}`}>
+                      <LocateFixed size={10} /> Near you · {o.distance_km} km
+                    </div>
+                  )}
                   <div className="absolute top-3 right-3 flex items-center gap-1 glass-heavy rounded-full px-2.5 py-1 text-[11px] text-amber-300">
                     <Star size={11} fill="currentColor" /> {o.rating.toFixed(1)}
                   </div>

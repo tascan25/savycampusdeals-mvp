@@ -15,6 +15,7 @@ import logging
 import asyncio
 import html
 import re
+import math
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Any
 from zoneinfo import ZoneInfo
@@ -282,6 +283,34 @@ def india_month_bounds(now: Optional[datetime] = None) -> tuple[datetime, dateti
     else:
         local_end = local_start.replace(month=local_start.month + 1)
     return local_start.astimezone(timezone.utc), local_end.astimezone(timezone.utc)
+
+
+def coupon_expiry_for_offer(
+    offer: dict, now: Optional[datetime] = None
+) -> datetime:
+    """Keep a coupon inside the redemption window configured for its offer."""
+    now = now or datetime.now(timezone.utc)
+    policy = get_redemption_policy(offer)
+    if policy == "daily":
+        return india_day_bounds(now)[1]
+    if policy == "monthly":
+        return india_month_bounds(now)[1]
+    return now + timedelta(days=30)
+
+
+def distance_km(
+    origin_lat: float, origin_lng: float, target_lat: float, target_lng: float
+) -> float:
+    """Return the great-circle distance between two latitude/longitude points."""
+    radius_km = 6371.0088
+    lat_1, lat_2 = math.radians(origin_lat), math.radians(target_lat)
+    delta_lat = math.radians(target_lat - origin_lat)
+    delta_lng = math.radians(target_lng - origin_lng)
+    haversine = (
+        math.sin(delta_lat / 2) ** 2
+        + math.cos(lat_1) * math.cos(lat_2) * math.sin(delta_lng / 2) ** 2
+    )
+    return radius_km * 2 * math.atan2(math.sqrt(haversine), math.sqrt(1 - haversine))
 
 
 DEV_OTP_FALLBACK = os.environ.get("DEV_OTP_FALLBACK", "true").lower() == "true"
@@ -1102,6 +1131,7 @@ async def submit_verification(
         )
 
     trusted_email = is_approved_college_email(user["email"])
+    college_name = body.college_name.strip()
     uploaded_images: list[dict[str, str]] = []
     college_id_image = (
         reusable_verification.get("college_id_image", "")
@@ -1152,7 +1182,7 @@ async def submit_verification(
         "user_id": user["_id"],
         "college_id_image": college_id_image,
         "selfie_image": selfie_image,
-        "college_name": body.college_name,
+        "college_name": college_name,
         "course": body.course,
         "year": body.year,
         "student_id_number": student_id_number,
@@ -1221,7 +1251,7 @@ async def submit_verification(
     user_updates = {
         "verification_status": "approved" if trusted_email else "pending",
         "verification_submitted_at": now,
-        "college": body.college_name,
+        "college": college_name,
         "course": body.course,
         "year": body.year,
     }
@@ -2242,7 +2272,7 @@ async def _analytics_daily_counts(collection, query: dict, date_field: str) -> d
 
 
 def canonical_college_name(value: str) -> str:
-    """Return a stable display name for conservative, known college aliases."""
+    """Group known college aliases for admin analytics without changing stored data."""
     cleaned = re.sub(r"[^a-z0-9&]+", " ", (value or "").casefold()).strip()
     cleaned = re.sub(
         r"\b(?:univeristy|unversity|univercity)\b",
@@ -2257,7 +2287,65 @@ def canonical_college_name(value: str) -> str:
     if cleaned in {"amity", "amity noida", "aamity"}:
         return "Amity University"
 
-    acronyms = {"du", "iiit", "iit", "ipec", "kiet", "nit"}
+    aliases = {
+        "iitd": "Indian Institute of Technology Delhi",
+        "iit delhi": "Indian Institute of Technology Delhi",
+        "indian institute of technology delhi": "Indian Institute of Technology Delhi",
+        "indian institute of technology new delhi": "Indian Institute of Technology Delhi",
+        "iitb": "Indian Institute of Technology Bombay",
+        "iit bombay": "Indian Institute of Technology Bombay",
+        "iit mumbai": "Indian Institute of Technology Bombay",
+        "indian institute of technology bombay": "Indian Institute of Technology Bombay",
+        "indian institute of technology mumbai": "Indian Institute of Technology Bombay",
+        "vit": "Vellore Institute of Technology",
+        "vit university": "Vellore Institute of Technology",
+        "vit vellore": "Vellore Institute of Technology",
+        "vellore institute of technology": "Vellore Institute of Technology",
+        "vellore institute of technology vellore": "Vellore Institute of Technology",
+        "kiet": "KIET University",
+        "kiets": "KIET University",
+        "kiet university": "KIET University",
+        "kiet deemed to be university": "KIET University",
+        "kiet group of institutions": "KIET University",
+        "krishna institute of engineering and technology": "KIET University",
+        "ipec": "Inderprastha Engineering College",
+        "inderprastha engineering college": "Inderprastha Engineering College",
+        "inderprastha engineering college ghaziabad": "Inderprastha Engineering College",
+        "indraprastha engineering college": "Inderprastha Engineering College",
+        "indraprastha engineering college ghaziabad": "Inderprastha Engineering College",
+        "its": "Institute of Technology & Science, Ghaziabad",
+        "i t s": "Institute of Technology & Science, Ghaziabad",
+        "its ghaziabad": "Institute of Technology & Science, Ghaziabad",
+        "i t s ghaziabad": "Institute of Technology & Science, Ghaziabad",
+        "institute of technology & science": "Institute of Technology & Science, Ghaziabad",
+        "institute of technology & science ghaziabad": "Institute of Technology & Science, Ghaziabad",
+        "institute of technology and science": "Institute of Technology & Science, Ghaziabad",
+        "institute of technology and science ghaziabad": "Institute of Technology & Science, Ghaziabad",
+        "its college of pharmacy": "I.T.S College of Pharmacy",
+        "i t s college of pharmacy": "I.T.S College of Pharmacy",
+        "iitm": "Indian Institute of Technology Madras",
+        "iit madras": "Indian Institute of Technology Madras",
+        "iit chennai": "Indian Institute of Technology Madras",
+        "indian institute of technology madras": "Indian Institute of Technology Madras",
+        "indian institute of technology chennai": "Indian Institute of Technology Madras",
+        "manit": "Maulana Azad National Institute of Technology",
+        "maulana azad national institute of technology": "Maulana Azad National Institute of Technology",
+        "maulana azad national institute of technology bhopal": "Maulana Azad National Institute of Technology",
+        "motilal nehru college": "Motilal Nehru College",
+        "motilal nehru college du": "Motilal Nehru College",
+        "motilal nehru college university of delhi": "Motilal Nehru College",
+        "rd engineering college": "R.D. Engineering College",
+        "r d engineering college": "R.D. Engineering College",
+        "rdec": "R.D. Engineering College",
+    }
+    if cleaned in aliases:
+        return aliases[cleaned]
+    if re.match(r"^kiet(?:s| university| group of institutions)?(?: ghaziabad)?$", cleaned):
+        return "KIET University"
+    if re.match(r"^i t s(?: mohan nagar)?(?: ghaziabad)?$", cleaned):
+        return "Institute of Technology & Science, Ghaziabad"
+
+    acronyms = {"du", "iiit", "iit", "ipec", "its", "kiet", "manit", "nit", "vit"}
     return " ".join(
         word.upper() if word in acronyms else word.title()
         for word in cleaned.split()
@@ -2957,6 +3045,13 @@ async def list_saved(user=Depends(get_current_user)):
 # Coupons
 # -----------------------------
 def serialize_coupon(c: dict, offer: dict = None) -> dict:
+    status = c["status"]
+    if (
+        status == "active"
+        and c.get("expires_at")
+        and _aware(c["expires_at"]) <= datetime.now(timezone.utc)
+    ):
+        status = "expired"
     return {
         "id": str(c["_id"]),
         "code": c["code"],
@@ -2967,7 +3062,7 @@ def serialize_coupon(c: dict, offer: dict = None) -> dict:
         "discount": (offer or {}).get("discount", ""),
         "image_url": (offer or {}).get("image_url", ""),
         "qr_data_uri": c.get("qr_data_uri", ""),
-        "status": c["status"],
+        "status": status,
         "created_at": c["created_at"].isoformat() if c.get("created_at") else None,
         "expires_at": c["expires_at"].isoformat() if c.get("expires_at") else None,
         "redeemed_at": c["redeemed_at"].isoformat() if c.get("redeemed_at") else None,
@@ -3059,7 +3154,7 @@ async def claim_offer(offer_id: str, user=Depends(get_verified_user)):
                     )
 
     code = f"SCD-{secrets.token_hex(4).upper()}"
-    expires = now + timedelta(days=30)
+    expires = coupon_expiry_for_offer(offer, now)
     # Encode as a URL so any phone camera opens the /scan page directly.
     payload = f"{FRONTEND_URL}/scan?c={code}"
     qr = generate_qr_data_uri(payload)
@@ -3246,7 +3341,14 @@ async def dashboard_stats(user=Depends(get_current_user)):
 # Outlets (local restaurants/cafes)
 # -----------------------------
 @api.get("/outlets")
-async def list_outlets(city: Optional[str] = None, q: Optional[str] = None):
+async def list_outlets(
+    city: Optional[str] = None,
+    q: Optional[str] = None,
+    lat: Optional[float] = Query(None, ge=-90, le=90),
+    lng: Optional[float] = Query(None, ge=-180, le=180),
+    nearby_only: bool = False,
+    radius_km: float = Query(5, gt=0, le=50),
+):
     query: dict = {}
     if city and city != "all":
         query["city"] = city
@@ -3260,7 +3362,23 @@ async def list_outlets(city: Optional[str] = None, q: Optional[str] = None):
     result = []
     for o in outlets:
         count = await db.offers.count_documents({"outlet_id": o["_id"]})
-        result.append(serialize_outlet(o, count))
+        serialized = serialize_outlet(o, count)
+        if lat is not None and lng is not None and o.get("lat") is not None and o.get("lng") is not None:
+            distance = distance_km(lat, lng, float(o["lat"]), float(o["lng"]))
+            serialized["distance_km"] = round(distance, 1)
+            serialized["is_nearby"] = distance <= radius_km
+        else:
+            serialized["distance_km"] = None
+            serialized["is_nearby"] = False
+        if not nearby_only or serialized["is_nearby"]:
+            result.append(serialized)
+    if lat is not None and lng is not None:
+        result.sort(
+            key=lambda outlet: (
+                outlet["distance_km"] is None,
+                outlet["distance_km"] if outlet["distance_km"] is not None else float("inf"),
+            )
+        )
     return result
 
 

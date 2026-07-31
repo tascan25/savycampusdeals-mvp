@@ -236,5 +236,91 @@
       "trending": true
     }
   ]
+},
+{
+  "name": "Crave & Co. Cafe",
+  "tagline": "Great Food, Better Hangouts.",
+  "cuisine": "Cafe, Fast Food",
+  "city": "Noida",
+  "address": "SL-01, Near Amity University Gate Number 2 Road, Raipur Khadar, Sector 126, Noida, Uttar Pradesh 201303",
+
+  "lat": 28.541752686713675,
+  "lng": 77.33415735581939,
+
+  "image_url": "/images/outlets/crave-co-cafe/thumbnail.webp",
+  "cover_url": "/images/outlets/crave-co-cafe/cover.webp",
+  "logo_url": "/images/outlets/crave-co-cafe/logo.webp",
+
+  "phone": "+91 9650832233",
+  "hours": "10:00 AM – 10:00 PM",
+  "rating": 4.5,
+
+  "offers": [
+    {
+      "title": "Flat 10% OFF on Total Bill",
+      "category": "Food",
+      "discount": "10% OFF",
+      "description": "Verified students get a flat 10% discount on the total dine-in bill.",
+      "terms": "Valid for dine-in only and once per student per day at this outlet. Outlet staff must scan and approve the SavvyCampusDeals QR before billing. Cannot be combined with any other ongoing offer.",
+      "redemption_policy": "daily",
+      "validity": "Ongoing",
+      "featured": true,
+      "trending": true
+    },
+    {
+      "title": "Buy 2 Get 1 FREE",
+      "category": "Food",
+      "discount": "BUY 2 GET 1",
+      "description": "Buy any 2 identical Pizzas, Brownies, Pasta, or Stuffed Parathas and get 1 FREE.",
+      "terms": "Applicable only on the same menu item and once per student per day at this outlet. Valid for dine-in only. Outlet staff must scan and approve the SavvyCampusDeals QR before billing. Only one offer can be used per bill and cannot be clubbed with any other offer.",
+      "redemption_policy": "daily",
+      "validity": "Ongoing",
+      "featured": true,
+      "trending": true
+    }
+  ]
+},
+{
+  "name": "Khayal Aapka Food Cafe",
+  "tagline": "Delicious Food, Everyday Smiles.",
+  "cuisine": "Cafe, Fast Food",
+  "city": "Noida",
+  "address": "SL-01, Near Amity University Gate Number 2 Road, Raipur Khadar, Sector 126, Noida, Uttar Pradesh 201303",
+
+  "lat": 28.542372285632688,
+  "lng": 77.33271197116387,
+
+  "image_url": "/images/outlets/khayaal-aapka/thumbnail.webp",
+  "cover_url": "/images/outlets/khayaal-aapka/cover.webp",
+  "logo_url": "/images/outlets/khayaal-aapka/logo.webp",
+
+  "phone": "+91 9911382321",
+  "hours": "10:00 AM – 11:00 PM",
+  "rating": 4.9,
+
+  "offers": [
+    {
+      "title": "10% OFF on Orders Above ₹100",
+      "category": "Food",
+      "discount": "10% OFF",
+      "description": "Verified students get 10% OFF on orders above ₹100.",
+      "terms": "Minimum order value ₹100. Valid once per student per day at this outlet. Outlet staff must scan and approve the SavvyCampusDeals QR before billing.",
+      "redemption_policy": "daily",
+      "validity": "Ongoing",
+      "featured": true,
+      "trending": true
+    },
+    {
+      "title": "FREE Lemon Soda + 10% OFF",
+      "category": "Food",
+      "discount": "FREE + 10% OFF",
+      "description": "On orders above ₹500, students receive a FREE Lemon Soda worth ₹70 along with an additional 10% OFF.",
+      "terms": "Minimum order value ₹500. Valid once per student per day at this outlet. Outlet staff must scan and approve the SavvyCampusDeals QR before billing.",
+      "redemption_policy": "daily",
+      "validity": "Ongoing",
+      "featured": true,
+      "trending": true
+    }
+  ]
 }
 ]

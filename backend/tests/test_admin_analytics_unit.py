@@ -35,4 +35,37 @@ def test_generic_names_are_case_and_punctuation_normalized():
     assert canonical_college_name("inderprastha engineering college") == (
         "Inderprastha Engineering College"
     )
-    assert canonical_college_name("IPEC") == "IPEC"
+    assert canonical_college_name("IPEC") == "Inderprastha Engineering College"
+
+
+def test_supported_college_short_and_full_names_share_canonical_names():
+    cases = {
+        "IITD": "Indian Institute of Technology Delhi",
+        "IIT Delhi": "Indian Institute of Technology Delhi",
+        "Indian Institute of Technology Bombay": "Indian Institute of Technology Bombay",
+        "IITB": "Indian Institute of Technology Bombay",
+        "VIT University": "Vellore Institute of Technology",
+        "VIT": "Vellore Institute of Technology",
+        "KIETS": "KIET University",
+        "Kiet Deemed to be University": "KIET University",
+        "KIET Group of Institutions": "KIET University",
+        "IPEC": "Inderprastha Engineering College",
+        "Indraprastha Engineering College": "Inderprastha Engineering College",
+        "I.T.S Mohan Nagar Ghaziabad": "Institute of Technology & Science, Ghaziabad",
+        "Institute of Technology and Science": "Institute of Technology & Science, Ghaziabad",
+        "ITS college of Pharmacy": "I.T.S College of Pharmacy",
+        "IIT MADRAS": "Indian Institute of Technology Madras",
+        "MANIT": "Maulana Azad National Institute of Technology",
+        "Motilal Nehru College , DU": "Motilal Nehru College",
+        "RD engineering college": "R.D. Engineering College",
+    }
+
+    for entered_name, expected in cases.items():
+        assert canonical_college_name(entered_name) == expected
+
+
+def test_shared_its_domain_preserves_the_specific_its_institution():
+    assert canonical_college_name("ITS college of Pharmacy") == "I.T.S College of Pharmacy"
+    assert canonical_college_name("I.T.S Mohan Nagar Ghaziabad") == (
+        "Institute of Technology & Science, Ghaziabad"
+    )
