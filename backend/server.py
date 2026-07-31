@@ -69,7 +69,7 @@ FROM_EMAIL = os.environ.get("FROM_EMAIL", "onboarding@resend.dev")
 APPROVED_COLLEGE_DOMAINS = {
     domain.strip().lower()
     for domain in os.environ.get(
-        "APPROVED_COLLEGE_DOMAINS", "iitd.ac.in,iitb.ac.in,vit.ac.in,amity.edu,s.amity.edu,kiet.edu,ipec.org.in,its.edu.in"
+        "APPROVED_COLLEGE_DOMAINS", "iitd.ac.in,iitb.ac.in,vit.ac.in,amity.edu,s.amity.edu,kiet.edu,ipec.org.in,its.edu.in,stu.manit.ac.in,ds.study.iitm.ac.in"
     ).split(",")
     if domain.strip()
 }
