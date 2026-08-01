@@ -322,5 +322,37 @@
       "trending": true
     }
   ]
+},
+{
+  "name": "HPMC Juice Counter",
+  "tagline": "Fresh, Healthy & Refreshing.",
+  "cuisine": "Juice Bar, Snacks",
+  "city": "Noida",
+  "address": "Gate No. 4B, Amity University, Sector 125, Noida, Uttar Pradesh 201313",
+
+  "lat": 28.547914539472025,
+  "lng": 77.3343556522646,
+
+  "image_url": "/images/outlets/hpmc-juice-corner/thumbnail.webp",
+  "cover_url": "/images/outlets/hpmc-juice-corner/cover.webp",
+  "logo_url": "/images/outlets/hpmc-juice-corner/logo.webp",
+
+  "phone": "+91 6005870413",
+  "hours": "8:00 AM – 9:00 PM",
+  "rating": 5.0,
+
+  "offers": [
+    {
+      "title": "FREE ₹50 Item on Orders Above ₹150",
+      "category": "Food",
+      "discount": "FREE ₹50",
+      "description": "Verified students get a FREE food or beverage item worth up to ₹50 on purchases above ₹150.",
+      "terms": "Minimum purchase of ₹150. Free item can be selected from eligible items such as Maggi, Cold Coffee, and other items worth up to ₹50. Valid once per student per day at this outlet. Outlet staff must scan and approve the SavvyCampusDeals QR before billing.",
+      "redemption_policy": "daily",
+      "validity": "Ongoing",
+      "featured": true,
+      "trending": true
+    }
+  ]
 }
 ]

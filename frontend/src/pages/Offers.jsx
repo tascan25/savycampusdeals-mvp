@@ -7,7 +7,16 @@ import OfferCard from "@/components/OfferCard";
 import api from "@/lib/api";
 import { toast } from "sonner";
 
-const CATS = ["all", "Food & Drink", "Fashion", "Tech", "Fitness", "Education", "Entertainment"];
+const FALLBACK_CATS = [
+  "Food & Drink",
+  "Fashion",
+  "Tech",
+  "Fitness",
+  "Education",
+  "Entertainment",
+  "Travel",
+  "Developer Tools",
+];
 const SORTS = [
   { k: "featured", label: "Featured" },
   { k: "trending", label: "Trending" },
@@ -18,6 +27,19 @@ export default function Offers() {
   const [q, setQ] = useState("");
   const [category, setCategory] = useState("all");
   const [sort, setSort] = useState("featured");
+
+  const { data: categoryData = [] } = useQuery({
+    queryKey: ["offer-categories"],
+    queryFn: async () => (await api.get("/offers/categories")).data,
+  });
+
+  const categories = useMemo(() => {
+    const available = categoryData
+      .map((item) => item?.name)
+      .filter((name) => typeof name === "string" && name.trim());
+    const source = available.length ? available : FALLBACK_CATS;
+    return ["all", ...Array.from(new Set(source)).sort((a, b) => a.localeCompare(b))];
+  }, [categoryData]);
 
   const { data = [], refetch, isLoading } = useQuery({
     queryKey: ["offers", q, category, sort],
@@ -69,7 +91,7 @@ export default function Offers() {
 
         {/* Category pills */}
         <div className="mt-6 flex flex-wrap gap-2">
-          {CATS.map((c) => (
+          {categories.map((c) => (
             <button
               key={c}
               data-testid={`offers-cat-${c.toLowerCase().replace(/[^a-z0-9]/g,'-')}`}

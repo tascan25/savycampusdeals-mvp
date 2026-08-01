@@ -33,7 +33,9 @@ export default function OfferCard({ offer, onToggleSave, index = 0 }) {
       </Link>
       <div className="p-4">
         <div className="flex items-center gap-2 mb-2">
-          <span className="text-[10px] uppercase tracking-widest text-zinc-500">{offer.category}</span>
+          <span className="text-[10px] uppercase tracking-widest text-zinc-500">
+            {(offer.categories?.length ? offer.categories : [offer.category]).join(" · ")}
+          </span>
           <span className="text-zinc-700">•</span>
           <span className="text-[11px] text-zinc-500 flex items-center gap-1"><MapPin size={10}/>{offer.location}</span>
         </div>

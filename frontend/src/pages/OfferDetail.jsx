@@ -82,7 +82,9 @@ export default function OfferDetail() {
                 {offer.trending && <span className="glass-heavy text-[10px] uppercase tracking-widest px-2 py-1 rounded-full text-emerald-300">Trending</span>}
               </div>
               <div className="absolute bottom-6 left-6">
-                <div className="text-[10px] uppercase tracking-widest text-white/70">{offer.category}</div>
+                <div className="text-[10px] uppercase tracking-widest text-white/70">
+                  {(offer.categories?.length ? offer.categories : [offer.category]).join(" · ")}
+                </div>
                 <div className="font-display text-4xl md:text-5xl font-extrabold mt-1" data-testid="offer-discount">{offer.discount}</div>
                 <div className="text-sm text-zinc-300 mt-1 flex items-center gap-1"><MapPin size={12}/>{offer.location}</div>
               </div>

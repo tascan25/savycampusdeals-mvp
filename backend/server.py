@@ -2890,6 +2890,32 @@ async def public_student_pass(
 # -----------------------------
 # Offers
 # -----------------------------
+def get_offer_categories(offer: dict) -> list[str]:
+    """Return every filterable category while supporting legacy offers."""
+    categories = offer.get("categories")
+    if not isinstance(categories, list):
+        categories = []
+    values = [
+        category.strip()
+        for category in categories
+        if isinstance(category, str) and category.strip()
+    ]
+    primary = offer.get("category", "")
+    if isinstance(primary, str) and primary.strip() and primary.strip() not in values:
+        values.insert(0, primary.strip())
+    return values
+
+
+def offer_category_query(category: str) -> dict:
+    """Match both new multi-category offers and legacy single-category offers."""
+    return {
+        "$or": [
+            {"category": category},
+            {"categories": category},
+        ]
+    }
+
+
 def serialize_offer(o: dict, saved_ids: set = None) -> dict:
     saved_ids = saved_ids or set()
     outlet_id = o.get("outlet_id")
@@ -2900,6 +2926,7 @@ def serialize_offer(o: dict, saved_ids: set = None) -> dict:
         "brand_logo": o.get("brand_logo", ""),
         "brand_url": o.get("brand_url", ""),
         "category": o["category"],
+        "categories": get_offer_categories(o),
         "description": o["description"],
         "discount": o["discount"],
         "image_url": o.get("image_url", ""),
@@ -2943,15 +2970,26 @@ async def list_offers(
     sort: str = "featured",
     request: Request = None,
 ):
-    query: dict = {}
+    filters = []
     if q:
-        query["$or"] = [
-            {"title": {"$regex": q, "$options": "i"}},
-            {"brand": {"$regex": q, "$options": "i"}},
-            {"description": {"$regex": q, "$options": "i"}},
-        ]
+        filters.append(
+            {
+                "$or": [
+                    {"title": {"$regex": q, "$options": "i"}},
+                    {"brand": {"$regex": q, "$options": "i"}},
+                    {"description": {"$regex": q, "$options": "i"}},
+                ]
+            }
+        )
     if category and category != "all":
-        query["category"] = category
+        filters.append(offer_category_query(category))
+
+    if len(filters) == 1:
+        query = filters[0]
+    elif filters:
+        query = {"$and": filters}
+    else:
+        query = {}
 
     cursor = db.offers.find(query)
     if sort == "trending":
@@ -2978,10 +3016,11 @@ async def list_offers(
 
 @api.get("/offers/categories")
 async def list_categories():
-    cats = await db.offers.distinct("category")
+    cats = set(await db.offers.distinct("category"))
+    cats.update(await db.offers.distinct("categories"))
     counts = []
-    for c in cats:
-        n = await db.offers.count_documents({"category": c})
+    for c in sorted(category for category in cats if isinstance(category, str) and category.strip()):
+        n = await db.offers.count_documents(offer_category_query(c))
         counts.append({"name": c, "count": n})
     return counts
 

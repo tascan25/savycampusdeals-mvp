@@ -15,6 +15,7 @@ OFFER_FIELDS = [
     "brand_logo",
     "brand_url",
     "category",
+    "categories",
     "description",
     "discount",
     "image_url",
@@ -56,6 +57,7 @@ def validate_offers(offers):
 
         brand = offer.get("brand")
         title = offer.get("title")
+        categories = offer.get("categories")
 
         if not brand or not isinstance(brand, str):
             raise ValueError(
@@ -65,6 +67,15 @@ def validate_offers(offers):
         if not title or not isinstance(title, str):
             raise ValueError(
                 f"Offer at index {index} has a missing or invalid title."
+            )
+
+        if categories is not None and (
+            not isinstance(categories, list)
+            or not categories
+            or any(not isinstance(category, str) or not category.strip() for category in categories)
+        ):
+            raise ValueError(
+                f"Offer at index {index} has invalid categories."
             )
 
         offer_key = (brand.strip(), title.strip())

@@ -59,7 +59,11 @@ def test_distance_between_the_two_new_noida_cafes_is_small():
 
 def test_new_noida_cafes_use_daily_redemption():
     outlets = json.loads((BACKEND_DIR / "data" / "outlets.json").read_text())
-    names = {"Crave & Co. Cafe", "Khayal Aapka Food Cafe"}
+    names = {
+        "Crave & Co. Cafe",
+        "Khayal Aapka Food Cafe",
+        "HPMC Juice Counter",
+    }
     cafes = [outlet for outlet in outlets if outlet["name"] in names]
 
     assert {outlet["name"] for outlet in cafes} == names

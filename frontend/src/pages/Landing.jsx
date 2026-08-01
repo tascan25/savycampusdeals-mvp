@@ -105,9 +105,9 @@ export default function Landing() {
             {/* Live stats strip */}
             <div className="mt-10 grid grid-cols-3 gap-3 max-w-lg">
               {[
-                { n: "12,847", l: "Verified students", g: "from-indigo-400 to-purple-400" },
-                { n: "₹1.2Cr", l: "Saved this year", g: "from-emerald-400 to-teal-400" },
-                { n: "500+", l: "Partner brands", g: "from-pink-400 to-amber-400" },
+                { n: "2000", l: "Verified students", g: "from-indigo-400 to-purple-400" },
+                { n: "₹20k", l: "Saved this year", g: "from-emerald-400 to-teal-400" },
+                { n: "100+", l: "Partner brands", g: "from-pink-400 to-amber-400" },
               ].map((s, i) => (
                 <motion.div
                   key={s.l}
