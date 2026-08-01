@@ -7,6 +7,7 @@ load_dotenv(ROOT_DIR / ".env")
 
 import os
 import io
+import csv
 import base64
 import hashlib
 import hmac
@@ -2249,6 +2250,183 @@ async def _coupon_counts_by_outlet(query: dict) -> dict:
     return {row["_id"]: row["count"] for row in rows if row.get("_id")}
 
 
+def _report_coupon_status(coupon: dict, now: Optional[datetime] = None) -> str:
+    """Expose stale active coupons as expired without mutating coupon records."""
+    status = coupon.get("status", "active")
+    current_time = now or datetime.now(timezone.utc)
+    if (
+        status == "active"
+        and coupon.get("expires_at")
+        and _aware(coupon["expires_at"]) <= current_time
+    ):
+        return "expired"
+    return status if status in {"active", "redeemed", "expired"} else "expired"
+
+
+def _brand_outlet_report_rows(
+    outlets: list[dict],
+    offers: list[dict],
+    coupons: list[dict],
+    now: Optional[datetime] = None,
+) -> list[dict]:
+    """Build report rows from existing records; this never changes source data."""
+    current_time = now or datetime.now(timezone.utc)
+    entities: dict[tuple[str, str], dict] = {}
+    offer_entity: dict[Any, tuple[str, str]] = {}
+    offer_by_id = {offer.get("_id"): offer for offer in offers}
+
+    for outlet in outlets:
+        key = ("outlet", str(outlet["_id"]))
+        entities[key] = {
+            "id": str(outlet["_id"]),
+            "type": "outlet",
+            "name": outlet.get("name", ""),
+            "logo_url": outlet.get("logo_url", ""),
+            "website": "",
+            "address": outlet.get("address", ""),
+            "city": outlet.get("city", ""),
+            "phone": outlet.get("phone", ""),
+            "offer_count": 0,
+            "claimed": 0,
+            "active": 0,
+            "redeemed": 0,
+            "expired": 0,
+            "unique_students": 0,
+            "last_redeemed_at": None,
+            "offers": [],
+            "recent_activity": [],
+            "_students": set(),
+            "_offer_rows": {},
+        }
+
+    brand_keys: dict[str, tuple[str, str]] = {}
+    for offer in offers:
+        outlet_id = offer.get("outlet_id")
+        if outlet_id:
+            key = ("outlet", str(outlet_id))
+            if key not in entities:
+                continue
+        else:
+            brand_name = (offer.get("brand") or "Unnamed brand").strip()
+            normalized = brand_name.casefold()
+            key = brand_keys.get(normalized)
+            if not key:
+                key = ("brand", brand_name)
+                brand_keys[normalized] = key
+                entities[key] = {
+                    "id": brand_name,
+                    "type": "brand",
+                    "name": brand_name,
+                    "logo_url": offer.get("brand_logo", ""),
+                    "website": offer.get("brand_url", ""),
+                    "address": "",
+                    "city": "",
+                    "phone": "",
+                    "offer_count": 0,
+                    "claimed": 0,
+                    "active": 0,
+                    "redeemed": 0,
+                    "expired": 0,
+                    "unique_students": 0,
+                    "last_redeemed_at": None,
+                    "offers": [],
+                    "recent_activity": [],
+                    "_students": set(),
+                    "_offer_rows": {},
+                }
+            elif not entities[key]["logo_url"] and offer.get("brand_logo"):
+                entities[key]["logo_url"] = offer["brand_logo"]
+            if not entities[key]["website"] and offer.get("brand_url"):
+                entities[key]["website"] = offer["brand_url"]
+
+        offer_id = offer.get("_id")
+        offer_entity[offer_id] = key
+        entity = entities[key]
+        entity["offer_count"] += 1
+        entity["_offer_rows"][offer_id] = {
+            "id": str(offer_id),
+            "title": offer.get("title", ""),
+            "discount": offer.get("discount", ""),
+            "claimed": 0,
+            "active": 0,
+            "redeemed": 0,
+            "expired": 0,
+            "unique_students": 0,
+            "redemption_rate": 0,
+            "_students": set(),
+        }
+
+    for coupon in coupons:
+        offer = offer_by_id.get(coupon.get("offer_id"))
+        key = offer_entity.get(coupon.get("offer_id"))
+        if not key and coupon.get("outlet_id"):
+            key = ("outlet", str(coupon["outlet_id"]))
+        if not key or key not in entities:
+            continue
+        entity = entities[key]
+        status = _report_coupon_status(coupon, current_time)
+        entity["claimed"] += 1
+        entity[status] += 1
+        if coupon.get("user_id"):
+            entity["_students"].add(coupon["user_id"])
+        redeemed_at = coupon.get("redeemed_at")
+        if redeemed_at and (
+            not entity["last_redeemed_at"]
+            or _aware(redeemed_at) > _aware(entity["last_redeemed_at"])
+        ):
+            entity["last_redeemed_at"] = redeemed_at
+
+        offer_row = entity["_offer_rows"].get(coupon.get("offer_id"))
+        if offer_row:
+            offer_row["claimed"] += 1
+            offer_row[status] += 1
+            if coupon.get("user_id"):
+                offer_row["_students"].add(coupon["user_id"])
+        entity["recent_activity"].append(
+            {
+                "id": str(coupon.get("_id", "")),
+                "code": coupon.get("code", ""),
+                "offer_title": (offer or {}).get("title", ""),
+                "status": status,
+                "claimed_at": _admin_datetime(coupon.get("created_at")),
+                "redeemed_at": _admin_datetime(redeemed_at),
+            }
+        )
+
+    result = []
+    for entity in entities.values():
+        entity["unique_students"] = len(entity.pop("_students"))
+        entity["redemption_rate"] = round(
+            (entity["redeemed"] / entity["claimed"] * 100) if entity["claimed"] else 0,
+            1,
+        )
+        offer_rows = list(entity.pop("_offer_rows").values())
+        for offer_row in offer_rows:
+            offer_row["unique_students"] = len(offer_row.pop("_students"))
+            offer_row["redemption_rate"] = round(
+                (offer_row["redeemed"] / offer_row["claimed"] * 100)
+                if offer_row["claimed"]
+                else 0,
+                1,
+            )
+        entity["offers"] = sorted(offer_rows, key=lambda row: row["title"].casefold())
+        entity["recent_activity"] = sorted(
+            entity["recent_activity"],
+            key=lambda row: row.get("claimed_at") or "",
+            reverse=True,
+        )[:10]
+        entity["last_redeemed_at"] = _admin_datetime(entity["last_redeemed_at"])
+        result.append(entity)
+    return sorted(result, key=lambda row: (row["type"] != "outlet", row["name"].casefold()))
+
+
+def _csv_cell(value: Any) -> Any:
+    """Prevent spreadsheet applications from treating exported text as formulas."""
+    if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")):
+        return f"'{value}"
+    return value
+
+
 async def _analytics_daily_counts(collection, query: dict, date_field: str) -> dict:
     rows = await collection.aggregate(
         [
@@ -2815,6 +2993,161 @@ async def admin_outlet_redemptions(
         "page_size": page_size,
         "total": total,
     }
+
+
+async def _load_brand_outlet_report_data(
+    start: Optional[datetime], end: Optional[datetime]
+) -> tuple[list[dict], list[dict], list[dict]]:
+    coupon_query = _with_date_range({}, "created_at", start, end)
+    outlets, offers, coupons = await asyncio.gather(
+        db.outlets.find({}).sort("name", 1).to_list(None),
+        db.offers.find({}).sort("title", 1).to_list(None),
+        db.coupons.find(
+            coupon_query,
+            {
+                "_id": 1,
+                "offer_id": 1,
+                "outlet_id": 1,
+                "user_id": 1,
+                "code": 1,
+                "status": 1,
+                "created_at": 1,
+                "expires_at": 1,
+                "redeemed_at": 1,
+            },
+        ).to_list(None),
+    )
+    return outlets, offers, coupons
+
+
+@api.get("/admin/brands-outlets")
+async def admin_brands_outlets(
+    entity_type: str = Query("all", alias="type"),
+    q: Optional[str] = Query(None, max_length=100),
+    city: Optional[str] = Query(None, max_length=100),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    admin=Depends(get_admin_user),
+):
+    """Read-only partner performance grouped by outlet or online brand."""
+    if entity_type not in {"all", "outlet", "brand"}:
+        raise HTTPException(400, "Type must be all, outlet, or brand")
+    start, end = _admin_report_date_range(date_from, date_to)
+    outlets, offers, coupons = await _load_brand_outlet_report_data(start, end)
+    rows = _brand_outlet_report_rows(outlets, offers, coupons)
+
+    available_cities = sorted(
+        {row["city"] for row in rows if row["type"] == "outlet" and row["city"]},
+        key=str.casefold,
+    )
+    if entity_type != "all":
+        rows = [row for row in rows if row["type"] == entity_type]
+    if city:
+        rows = [row for row in rows if row["city"].casefold() == city.casefold()]
+    if q and q.strip():
+        needle = q.strip().casefold()
+        rows = [
+            row
+            for row in rows
+            if needle
+            in " ".join(
+                [row["name"], row["address"], row["city"], row["website"]]
+            ).casefold()
+        ]
+
+    return {
+        "summary": {
+            "entities": len(rows),
+            "outlets": sum(row["type"] == "outlet" for row in rows),
+            "brands": sum(row["type"] == "brand" for row in rows),
+            "offers": sum(row["offer_count"] for row in rows),
+            "claimed": sum(row["claimed"] for row in rows),
+            "active": sum(row["active"] for row in rows),
+            "redeemed": sum(row["redeemed"] for row in rows),
+            "expired": sum(row["expired"] for row in rows),
+        },
+        "items": rows,
+        "cities": available_cities,
+        "date_basis": "Coupons are grouped by their claimed date; statuses are current.",
+    }
+
+
+@api.get("/admin/brands-outlets/export")
+async def admin_brands_outlets_export(
+    entity_type: str = Query(..., alias="type"),
+    entity_id: str = Query(..., min_length=1, max_length=200),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    admin=Depends(get_admin_user),
+):
+    """Export a privacy-safe, offer-level report for one partner entity."""
+    if entity_type not in {"outlet", "brand"}:
+        raise HTTPException(400, "Type must be outlet or brand")
+    start, end = _admin_report_date_range(date_from, date_to)
+    outlets, offers, coupons = await _load_brand_outlet_report_data(start, end)
+    rows = _brand_outlet_report_rows(outlets, offers, coupons)
+    entity = next(
+        (
+            row
+            for row in rows
+            if row["type"] == entity_type
+            and (
+                row["id"] == entity_id
+                if entity_type == "outlet"
+                else row["id"].casefold() == entity_id.casefold()
+            )
+        ),
+        None,
+    )
+    if not entity:
+        raise HTTPException(404, "Brand or outlet not found")
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(
+        [
+            "Partner type",
+            "Partner name",
+            "Location",
+            "Offer",
+            "Discount",
+            "Coupons claimed",
+            "Active",
+            "Redeemed",
+            "Expired",
+            "Unique students",
+            "Redemption rate (%)",
+            "Date from",
+            "Date to",
+        ]
+    )
+    for offer in entity["offers"]:
+        writer.writerow(
+            [
+                entity["type"].title(),
+                _csv_cell(entity["name"]),
+                _csv_cell(entity["address"] or entity["city"] or "Online"),
+                _csv_cell(offer["title"]),
+                _csv_cell(offer["discount"]),
+                offer["claimed"],
+                offer["active"],
+                offer["redeemed"],
+                offer["expired"],
+                offer["unique_students"],
+                offer["redemption_rate"],
+                date_from or "All time",
+                date_to or "All time",
+            ]
+        )
+    slug = re.sub(r"[^a-z0-9]+", "-", entity["name"].casefold()).strip("-") or "report"
+    return Response(
+        content="\ufeff" + output.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{slug}-coupon-report.csv"',
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @api.get("/verification/status")
