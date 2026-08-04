@@ -118,10 +118,10 @@ class TestScan:
 
     def test_lookup_coupon_raw_and_prefixed(self, s, scanner_headers):
         u = _register_verified_student(s)
-        # claim a non-outlet offer
+        # Scanner codes are issued only for partner-outlet offers.
         offers = s.get(f"{API}/offers").json()
-        non_outlet = next(o for o in offers if not o.get("outlet_id"))
-        r = s.post(f"{API}/offers/{non_outlet['id']}/claim", headers=u["headers"])
+        outlet_offer = next(o for o in offers if o.get("outlet_id"))
+        r = s.post(f"{API}/offers/{outlet_offer['id']}/claim", headers=u["headers"])
         assert r.status_code == 200
         code = r.json()["code"]
 
@@ -131,11 +131,11 @@ class TestScan:
         d = r.json()
         assert d["kind"] == "coupon"
         assert d["code"] == code
-        assert d["brand"] == non_outlet["brand"]
+        assert d["brand"] == outlet_offer["brand"]
         assert d["student_name"] == "Test Student"
 
         # COUPON|... payload
-        payload = f"COUPON|{code}|{u['user_id']}|{non_outlet['id']}"
+        payload = f"COUPON|{code}|{u['user_id']}|{outlet_offer['id']}"
         r = s.post(f"{API}/scan/lookup", json={"payload": payload}, headers=scanner_headers)
         assert r.status_code == 200
         assert r.json()["code"] == code
@@ -143,8 +143,8 @@ class TestScan:
     def test_redeem_then_conflict(self, s, scanner_headers):
         u = _register_verified_student(s)
         offers = s.get(f"{API}/offers").json()
-        non_outlet = next(o for o in offers if not o.get("outlet_id"))
-        code = s.post(f"{API}/offers/{non_outlet['id']}/claim", headers=u["headers"]).json()["code"]
+        outlet_offer = next(o for o in offers if o.get("outlet_id"))
+        code = s.post(f"{API}/offers/{outlet_offer['id']}/claim", headers=u["headers"]).json()["code"]
 
         r = s.post(f"{API}/scan/redeem", json={"payload": code}, headers=scanner_headers)
         assert r.status_code == 200, r.text

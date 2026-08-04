@@ -62,6 +62,28 @@ def test_report_groups_outlets_and_case_insensitive_online_brands():
     assert brand["redemption_rate"] == 100.0
 
 
+def test_listed_brand_claim_counts_as_claimed_but_not_redeemable():
+    now, outlets, offers, _ = report_records()
+    brand_offer = next(offer for offer in offers if not offer.get("outlet_id"))
+    activity = [{
+        "_id": ObjectId(),
+        "offer_id": brand_offer["_id"],
+        "outlet_id": None,
+        "user_id": ObjectId(),
+        "status": "claimed",
+        "record_type": "brand_offer_claim",
+        "created_at": now,
+    }]
+
+    rows = server._brand_outlet_report_rows(outlets, offers, activity, now=now)
+    brand = next(row for row in rows if row["type"] == "brand")
+
+    assert brand["claimed"] == 1
+    assert brand["active"] == 0
+    assert brand["redeemed"] == 0
+    assert brand["expired"] == 0
+
+
 def test_admin_report_filters_type_city_and_search(monkeypatch):
     _, outlets, offers, coupons = report_records()
 
@@ -102,7 +124,7 @@ def test_csv_export_contains_offer_summary_without_student_identity(monkeypatch)
     content = response.body.decode("utf-8")
 
     assert "Lunch combo" in content
-    assert "Coupons claimed" in content
+    assert "Offers claimed" in content
     assert "student_one" not in content
     assert "email" not in content.casefold()
     assert response.headers["content-disposition"].endswith('campus-cafe-coupon-report.csv"')

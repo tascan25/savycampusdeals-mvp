@@ -65,6 +65,12 @@ INDIA_TIMEZONE = ZoneInfo("Asia/Kolkata")
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 FROM_EMAIL = os.environ.get("FROM_EMAIL", "onboarding@resend.dev")
+BRAND_OFFER_DISCLAIMER = (
+    "SavvyCampusDeals helps students discover this publicly available offer. "
+    "Eligibility, verification, availability and fulfilment are managed by the "
+    "brand. SavvyCampusDeals is not affiliated with the brand unless the offer "
+    "is marked as a Partner Offer."
+)
 # Keep this list deliberately explicit: a domain is trusted only when it appears
 # here.  A non-consumer domain alone is never enough to bypass document review.
 APPROVED_COLLEGE_DOMAINS = {
@@ -2364,9 +2370,11 @@ def _brand_outlet_report_rows(
         if not key or key not in entities:
             continue
         entity = entities[key]
-        status = _report_coupon_status(coupon, current_time)
+        is_brand_claim = coupon.get("record_type") == "brand_offer_claim"
+        status = "claimed" if is_brand_claim else _report_coupon_status(coupon, current_time)
         entity["claimed"] += 1
-        entity[status] += 1
+        if not is_brand_claim:
+            entity[status] += 1
         if coupon.get("user_id"):
             entity["_students"].add(coupon["user_id"])
         redeemed_at = coupon.get("redeemed_at")
@@ -2379,7 +2387,8 @@ def _brand_outlet_report_rows(
         offer_row = entity["_offer_rows"].get(coupon.get("offer_id"))
         if offer_row:
             offer_row["claimed"] += 1
-            offer_row[status] += 1
+            if not is_brand_claim:
+                offer_row[status] += 1
             if coupon.get("user_id"):
                 offer_row["_students"].add(coupon["user_id"])
         entity["recent_activity"].append(
@@ -2998,8 +3007,11 @@ async def admin_outlet_redemptions(
 async def _load_brand_outlet_report_data(
     start: Optional[datetime], end: Optional[datetime]
 ) -> tuple[list[dict], list[dict], list[dict]]:
-    coupon_query = _with_date_range({}, "created_at", start, end)
-    outlets, offers, coupons = await asyncio.gather(
+    coupon_query = _with_date_range(
+        {"status": {"$ne": "archived"}}, "created_at", start, end
+    )
+    brand_claim_query = _with_date_range({}, "claimed_at", start, end)
+    outlets, offers, coupons, brand_claims = await asyncio.gather(
         db.outlets.find({}).sort("name", 1).to_list(None),
         db.offers.find({}).sort("title", 1).to_list(None),
         db.coupons.find(
@@ -3016,6 +3028,36 @@ async def _load_brand_outlet_report_data(
                 "redeemed_at": 1,
             },
         ).to_list(None),
+        db.brand_offer_claims.find(
+            brand_claim_query,
+            {
+                "_id": 1,
+                "offer_id": 1,
+                "user_id": 1,
+                "claimed_at": 1,
+            },
+        ).to_list(None),
+    )
+    brand_claim_keys = {
+        (claim.get("user_id"), claim.get("offer_id")) for claim in brand_claims
+    }
+    coupons = [
+        coupon
+        for coupon in coupons
+        if coupon.get("outlet_id")
+        or (coupon.get("user_id"), coupon.get("offer_id")) not in brand_claim_keys
+    ]
+    coupons.extend(
+        {
+            **claim,
+            "record_type": "brand_offer_claim",
+            "created_at": claim.get("claimed_at"),
+            "status": "claimed",
+            "code": "",
+            "outlet_id": None,
+            "redeemed_at": None,
+        }
+        for claim in brand_claims
     )
     return outlets, offers, coupons
 
@@ -3068,7 +3110,7 @@ async def admin_brands_outlets(
         },
         "items": rows,
         "cities": available_cities,
-        "date_basis": "Coupons are grouped by their claimed date; statuses are current.",
+        "date_basis": "Coupons are grouped alongside listed brand claims by their claimed date; coupon statuses are current.",
     }
 
 
@@ -3106,12 +3148,12 @@ async def admin_brands_outlets_export(
     writer = csv.writer(output)
     writer.writerow(
         [
-            "Partner type",
-            "Partner name",
+            "Offer type",
+            "Brand or outlet",
             "Location",
             "Offer",
             "Discount",
-            "Coupons claimed",
+            "Offers claimed",
             "Active",
             "Redeemed",
             "Expired",
@@ -3271,6 +3313,8 @@ def serialize_offer(o: dict, saved_ids: set = None) -> dict:
         "claims_count": o.get("claims_count", 0),
         "saved": str(o["_id"]) in saved_ids,
         "outlet_id": str(outlet_id) if outlet_id else None,
+        "offer_type": "partner_outlet" if outlet_id else "listed_brand",
+        "disclaimer": "" if outlet_id else BRAND_OFFER_DISCLAIMER,
         "redemption_policy": o.get("redemption_policy", ""),
         "created_at": o.get("created_at").isoformat() if o.get("created_at") else None,
     }
@@ -3416,6 +3460,131 @@ async def list_saved(user=Depends(get_current_user)):
 # -----------------------------
 # Coupons
 # -----------------------------
+def serialize_brand_offer_claim(claim: dict, offer: dict) -> dict:
+    return {
+        "id": str(claim["_id"]),
+        "kind": "listed_brand_offer",
+        "status": "claimed",
+        "offer_id": str(claim["offer_id"]),
+        "offer_title": offer.get("title", ""),
+        "brand": offer.get("brand", ""),
+        "brand_logo": offer.get("brand_logo", ""),
+        "discount": offer.get("discount", ""),
+        "image_url": offer.get("image_url", ""),
+        "official_url": offer.get("brand_url", ""),
+        "terms": offer.get("terms", ""),
+        "validity": offer.get("validity", ""),
+        "disclaimer": BRAND_OFFER_DISCLAIMER,
+        "claimed_at": (
+            claim["claimed_at"].isoformat() if claim.get("claimed_at") else None
+        ),
+        "last_visited_at": (
+            claim["last_visited_at"].isoformat()
+            if claim.get("last_visited_at")
+            else None
+        ),
+        "legacy": str(claim.get("source", "")).startswith("legacy_coupon"),
+    }
+
+
+def listed_brand_offer_email(offer: dict) -> str:
+    brand = html.escape(offer.get("brand", "Brand"))
+    title = html.escape(offer.get("title", "Student offer"))
+    discount = html.escape(offer.get("discount", "Student offer"))
+    terms = html.escape(offer.get("terms", "Check the official website for terms."))
+    official_url = html.escape(offer.get("brand_url", ""), quote=True)
+    disclaimer = html.escape(BRAND_OFFER_DISCLAIMER)
+    return f"""<!doctype html>
+<html lang="en">
+  <body style="margin:0;padding:0;background-color:#0a0a0f;color:#f8fafc;font-family:Arial,Helvetica,sans-serif;-webkit-text-size-adjust:100%;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">Your link to the {brand} student offer is ready.</div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;background-color:#0a0a0f;">
+      <tr><td align="center" style="padding:28px 16px 40px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;margin:0 auto;">
+          <tr><td style="padding:0 8px 28px;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+              <td style="width:34px;height:34px;border-radius:10px;background-color:#7c3aed;text-align:center;font-size:18px;line-height:34px;">S</td>
+              <td style="padding-left:10px;vertical-align:middle;"><div style="font-size:16px;line-height:20px;font-weight:700;color:#ffffff;">SavvyCampusDeals</div><div style="font-size:11px;line-height:16px;color:#a1a1aa;">Exclusive student deals</div></td>
+            </tr></table>
+          </td></tr>
+          <tr><td style="padding:32px 28px 30px;border:1px solid #312e4b;border-radius:24px 24px 0 0;background-color:#171425;background-image:linear-gradient(135deg,#171425 0%,#1d1740 58%,#102d38 100%);">
+            <div style="display:inline-block;padding:6px 10px;border:1px solid #514b75;border-radius:999px;background-color:#292343;color:#c4b5fd;font-size:11px;line-height:14px;font-weight:700;letter-spacing:0.7px;text-transform:uppercase;">Listed brand offer</div>
+            <h1 style="margin:18px 0 10px;font-size:32px;line-height:38px;font-weight:800;letter-spacing:-1px;color:#ffffff;">Your student offer link is ready</h1>
+            <p style="margin:0;font-size:16px;line-height:24px;color:#d4d4dc;">Continue to {brand}'s official website to check eligibility and activate the offer.</p>
+          </td></tr>
+          <tr><td style="padding:0 28px 30px;border-left:1px solid #312e4b;border-right:1px solid #312e4b;background-color:#171425;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border:1px solid #4b4670;border-radius:20px;background-color:#11111a;">
+              <tr><td style="padding:24px 22px 12px;"><div style="font-size:12px;line-height:16px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;color:#a78bfa;">{brand}</div><div style="padding-top:7px;font-size:20px;line-height:27px;font-weight:700;color:#ffffff;">{title}</div><div style="padding-top:10px;font-size:25px;line-height:31px;font-weight:800;color:#ffffff;">{discount}</div></td></tr>
+              <tr><td align="center" style="padding:14px 22px 24px;"><a href="{official_url}" style="display:inline-block;padding:14px 24px;border-radius:999px;background-color:#ffffff;color:#111111;font-size:14px;line-height:18px;font-weight:700;text-decoration:none;">Continue to official website</a></td></tr>
+            </table>
+          </td></tr>
+          <tr><td style="padding:0 28px 26px;border-left:1px solid #312e4b;border-right:1px solid #312e4b;background-color:#171425;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-radius:18px;background-color:#0e2028;"><tr><td style="padding:20px 18px;"><div style="font-size:17px;line-height:23px;font-weight:700;color:#ffffff;">How to access the offer</div><div style="padding-top:10px;font-size:14px;line-height:22px;color:#d1e4e9;">Use the official link above, then follow the brand's own student-verification and activation process. SavvyCampusDeals does not issue a redemption code for this offer.</div></td></tr></table>
+          </td></tr>
+          <tr><td style="padding:0 28px 26px;border-left:1px solid #312e4b;border-right:1px solid #312e4b;background-color:#171425;">
+            <div style="font-size:12px;line-height:19px;color:#a1a1aa;"><strong style="color:#ffffff;">Offer terms:</strong> {terms}</div>
+          </td></tr>
+          <tr><td style="padding:0 28px 30px;border-left:1px solid #312e4b;border-right:1px solid #312e4b;background-color:#171425;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border:1px solid #514b75;border-radius:16px;background-color:#211d35;"><tr><td style="padding:17px 18px;"><div style="font-size:13px;line-height:19px;font-weight:700;color:#f5f3ff;">Important information</div><div style="padding-top:5px;font-size:12px;line-height:19px;color:#c9c4df;">{disclaimer}</div></td></tr></table>
+          </td></tr>
+          <tr><td style="padding:25px 28px 28px;border:1px solid #312e4b;border-top:0;border-radius:0 0 24px 24px;background-color:#12111d;text-align:center;"><div style="font-size:14px;line-height:20px;font-weight:700;color:#ffffff;">SavvyCampusDeals</div><div style="padding-top:5px;font-size:12px;line-height:18px;color:#a1a1aa;">Helping students discover better student offers.</div><div style="padding-top:13px;font-size:12px;line-height:18px;color:#777286;">Made with &#10084;&#65039; for students &middot; &copy; 2026 SavvyCampusDeals</div></td></tr>
+        </table>
+      </td></tr>
+    </table>
+  </body>
+</html>"""
+
+
+async def claim_listed_brand_offer(offer: dict, user: dict, now: datetime) -> dict:
+    official_url = offer.get("brand_url", "").strip()
+    if not re.match(r"^https?://", official_url, re.IGNORECASE):
+        raise HTTPException(409, "This brand offer does not have a valid official link")
+
+    query = {"user_id": user["_id"], "offer_id": offer["_id"]}
+    existing = await db.brand_offer_claims.find_one(query)
+    if existing:
+        await db.brand_offer_claims.update_one(
+            {"_id": existing["_id"]},
+            {"$set": {"last_visited_at": now}, "$inc": {"visit_count": 1}},
+        )
+        existing = {
+            **existing,
+            "last_visited_at": now,
+            "visit_count": existing.get("visit_count", 1) + 1,
+        }
+        return serialize_brand_offer_claim(existing, offer)
+
+    claim = {
+        "user_id": user["_id"],
+        "offer_id": offer["_id"],
+        "status": "claimed",
+        "claimed_at": now,
+        "last_visited_at": now,
+        "visit_count": 1,
+        "source": "website",
+    }
+    try:
+        result = await db.brand_offer_claims.insert_one(claim)
+        claim["_id"] = result.inserted_id
+    except DuplicateKeyError:
+        await db.brand_offer_claims.update_one(
+            query,
+            {"$set": {"last_visited_at": now}, "$inc": {"visit_count": 1}},
+        )
+        claim = await db.brand_offer_claims.find_one(query)
+        return serialize_brand_offer_claim(claim, offer)
+
+    await db.offers.update_one(
+        {"_id": offer["_id"]}, {"$inc": {"claims_count": 1}}
+    )
+    send_email(
+        user["email"],
+        f"Your link to the {offer['brand']} student offer",
+        listed_brand_offer_email(offer),
+    )
+    return serialize_brand_offer_claim(claim, offer)
+
+
 def serialize_coupon(c: dict, offer: dict = None) -> dict:
     status = c["status"]
     if (
@@ -3454,6 +3623,13 @@ async def claim_offer(offer_id: str, user=Depends(get_verified_user)):
         raise HTTPException(404, "Offer not found")
 
     now = datetime.now(timezone.utc)
+    outlet_oid = offer.get("outlet_id")
+
+    # Listed online offers are discovery links, not Savy-issued coupons. Keep
+    # this branch before every coupon/QR operation so outlet behavior remains
+    # byte-for-byte compatible below.
+    if not outlet_oid:
+        return await claim_listed_brand_offer(offer, user, now)
 
     # Prevent duplicate active coupons for the same offer. An expiry is also
     # applied here so an unscanned, stale coupon cannot block a fresh claim.
@@ -3471,7 +3647,6 @@ async def claim_offer(offer_id: str, user=Depends(get_verified_user)):
 
     # Apply the policy configured on this specific outlet offer. Every issued
     # QR still keeps the same 30-day expiry below.
-    outlet_oid = offer.get("outlet_id")
     if outlet_oid:
         policy = get_redemption_policy(offer)
         if policy == "daily":
@@ -3663,7 +3838,13 @@ async def claim_offer(offer_id: str, user=Depends(get_verified_user)):
 @api.get("/coupons")
 async def my_coupons(user=Depends(get_current_user)):
     coupons = (
-        await db.coupons.find({"user_id": user["_id"]})
+        await db.coupons.find(
+            {
+                "user_id": user["_id"],
+                "outlet_id": {"$ne": None},
+                "status": {"$ne": "archived"},
+            }
+        )
         .sort("created_at", -1)
         .to_list(200)
     )
@@ -3674,9 +3855,78 @@ async def my_coupons(user=Depends(get_current_user)):
     return result
 
 
+@api.get("/brand-offer-claims")
+async def my_brand_offer_claims(user=Depends(get_current_user)):
+    """Return new claims plus a non-mutating view of legacy brand coupons."""
+    claims = (
+        await db.brand_offer_claims.find({"user_id": user["_id"]})
+        .sort("claimed_at", -1)
+        .to_list(200)
+    )
+    legacy_coupons = (
+        await db.coupons.find(
+            {
+                "user_id": user["_id"],
+                "outlet_id": None,
+                "status": {"$ne": "archived"},
+            }
+        )
+        .sort("created_at", -1)
+        .to_list(200)
+    )
+    offer_ids = {
+        record.get("offer_id")
+        for record in [*claims, *legacy_coupons]
+        if record.get("offer_id")
+    }
+    offers = (
+        await db.offers.find({"_id": {"$in": list(offer_ids)}}).to_list(400)
+        if offer_ids
+        else []
+    )
+    offer_by_id = {offer["_id"]: offer for offer in offers}
+    result = []
+    claimed_offer_ids = set()
+    for claim in claims:
+        offer = offer_by_id.get(claim.get("offer_id"))
+        if not offer or offer.get("outlet_id"):
+            continue
+        claimed_offer_ids.add(claim["offer_id"])
+        result.append(serialize_brand_offer_claim(claim, offer))
+    for coupon in legacy_coupons:
+        offer = offer_by_id.get(coupon.get("offer_id"))
+        if (
+            not offer
+            or offer.get("outlet_id")
+            or coupon.get("offer_id") in claimed_offer_ids
+        ):
+            continue
+        claimed_offer_ids.add(coupon["offer_id"])
+        legacy_claim = {
+            "_id": f"legacy-{coupon['_id']}",
+            "offer_id": coupon["offer_id"],
+            "claimed_at": coupon.get("created_at"),
+            "last_visited_at": None,
+            "source": "legacy_coupon",
+        }
+        result.append(serialize_brand_offer_claim(legacy_claim, offer))
+    return sorted(
+        result,
+        key=lambda claim: claim.get("claimed_at") or "",
+        reverse=True,
+    )
+
+
 @api.get("/coupons/{coupon_id}")
 async def get_coupon(coupon_id: str, user=Depends(get_current_user)):
-    c = await db.coupons.find_one({"_id": ObjectId(coupon_id), "user_id": user["_id"]})
+    c = await db.coupons.find_one(
+        {
+            "_id": ObjectId(coupon_id),
+            "user_id": user["_id"],
+            "outlet_id": {"$ne": None},
+            "status": {"$ne": "archived"},
+        }
+    )
     if not c:
         raise HTTPException(404, "Coupon not found")
     o = await db.offers.find_one({"_id": c["offer_id"]})
@@ -3688,17 +3938,39 @@ async def get_coupon(coupon_id: str, user=Depends(get_current_user)):
 # -----------------------------
 @api.get("/dashboard/stats")
 async def dashboard_stats(user=Depends(get_current_user)):
-    claimed = await db.coupons.count_documents({"user_id": user["_id"]})
+    outlet_coupon_query = {
+        "user_id": user["_id"],
+        "outlet_id": {"$ne": None},
+        "status": {"$ne": "archived"},
+    }
+    outlet_claimed = await db.coupons.count_documents(outlet_coupon_query)
+    brand_offer_ids = set(
+        await db.brand_offer_claims.distinct(
+            "offer_id", {"user_id": user["_id"]}
+        )
+    )
+    brand_offer_ids.update(
+        await db.coupons.distinct(
+            "offer_id",
+            {
+                "user_id": user["_id"],
+                "outlet_id": None,
+                "status": {"$ne": "archived"},
+            },
+        )
+    )
+    claimed = outlet_claimed + len(brand_offer_ids)
     redeemed = await db.coupons.count_documents(
-        {"user_id": user["_id"], "status": "redeemed"}
+        {**outlet_coupon_query, "status": "redeemed"}
     )
     active = await db.coupons.count_documents(
-        {"user_id": user["_id"], "status": "active"}
+        {**outlet_coupon_query, "status": "active"}
     )
     saved = await db.saved_offers.count_documents({"user_id": user["_id"]})
     total_offers = await db.offers.count_documents({})
     return {
         "claimed": claimed,
+        "brand_claimed": len(brand_offer_ids),
         "redeemed": redeemed,
         "active": active,
         "saved": saved,
@@ -3951,6 +4223,11 @@ async def scan_lookup(body: ScanIn, scanner=Depends(get_scanner_user)):
         if not c:
             raise HTTPException(404, "Coupon not found")
         ensure_scanner_coupon_access(scanner, c)
+        if c.get("status") == "archived":
+            raise HTTPException(
+                410,
+                "This legacy brand coupon has been archived and cannot be redeemed",
+            )
         offer = await db.offers.find_one({"_id": c["offer_id"]})
         user = await db.users.find_one({"_id": c["user_id"]})
         student_expiry = (user or {}).get("verification_expiry")
@@ -4006,6 +4283,11 @@ async def scan_redeem(body: ScanIn, scanner=Depends(get_scanner_user)):
     if not c:
         raise HTTPException(404, "Coupon not found")
     ensure_scanner_coupon_access(scanner, c)
+    if c.get("status") == "archived":
+        raise HTTPException(
+            410,
+            "This legacy brand coupon has been archived and cannot be redeemed",
+        )
     if c["status"] == "redeemed":
         raise HTTPException(409, "Coupon already redeemed")
     if c.get("expires_at") and _aware(c["expires_at"]) < datetime.now(timezone.utc):
@@ -4620,6 +4902,10 @@ async def on_startup():
         await db.coupons.create_index(
             [("outlet_id", 1), ("status", 1), ("redeemed_at", -1)]
         )
+        await db.brand_offer_claims.create_index(
+            [("user_id", 1), ("offer_id", 1)], unique=True
+        )
+        await db.brand_offer_claims.create_index([("claimed_at", -1)])
         await db.users.create_index([("verification_status", 1), ("created_at", -1)])
         await db.users.create_index(
             [("verification_status", 1), ("verification_expiry", 1)]

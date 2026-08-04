@@ -159,7 +159,7 @@ def test_verification_optional_images_auto_approves():
     assert body["user"]["student_number"].startswith("SCD-")
 
 
-# ---------- Brand offer claim returns coupon (no outlet) ----------
+# ---------- Brand offer claim returns an official link, never a Savy coupon ----------
 def test_brand_offer_claim_succeeds_after_full_verification():
     email = _uniq_email()
     token = _register_and_login(email)
@@ -178,9 +178,12 @@ def test_brand_offer_claim_succeeds_after_full_verification():
         headers={"Authorization": f"Bearer {token}"},
     )
     assert r.status_code == 200, r.text
-    coupon = r.json()
-    assert coupon["code"].startswith("SCD-")
-    assert coupon["status"] == "active"
+    claim = r.json()
+    assert claim["kind"] == "listed_brand_offer"
+    assert claim["status"] == "claimed"
+    assert claim["official_url"] == brand["brand_url"]
+    assert "code" not in claim
+    assert "qr_data_uri" not in claim
 
 
 # ---------- Admin bypass ----------

@@ -146,7 +146,7 @@ class TestScanLookupExpandedCoupon:
         # Get an offer, claim it
         offers = requests.get(f"{API}/offers").json()
         assert offers
-        offer_id = offers[0]["id"]
+        offer_id = next(offer["id"] for offer in offers if offer.get("outlet_id"))
         cl = requests.post(f"{API}/offers/{offer_id}/claim", headers=headers)
         assert cl.status_code == 200, cl.text
         code = cl.json()["code"]

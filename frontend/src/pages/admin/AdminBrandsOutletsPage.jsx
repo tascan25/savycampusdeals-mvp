@@ -22,6 +22,7 @@ const dateText = (value) => {
 };
 
 const statusClass = {
+  claimed: "border-indigo-400/20 bg-indigo-500/10 text-indigo-200",
   active: "border-amber-400/20 bg-amber-500/10 text-amber-200",
   redeemed: "border-emerald-400/20 bg-emerald-500/10 text-emerald-300",
   expired: "border-zinc-400/20 bg-zinc-500/10 text-zinc-300",
@@ -56,7 +57,7 @@ function PartnerDetails({ item, open, onClose, onExport, exporting }) {
       <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-zinc-400">
         {item.address && <span className="inline-flex items-center gap-1.5"><MapPin size={14} />{item.address}</span>}
         {safeWebsite && <a href={safeWebsite} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-indigo-300 hover:text-indigo-200">Visit website <ExternalLink size={13} /></a>}
-        <span>Last redemption: {dateText(item.last_redeemed_at)}</span>
+        <span>{item.type === "brand" ? "Listed brand offer" : `Last redemption: ${dateText(item.last_redeemed_at)}`}</span>
       </div>
       <button onClick={() => onExport(item)} disabled={exporting} className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-bold text-black disabled:opacity-60">{exporting ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />} Export CSV</button>
     </div>
@@ -64,7 +65,7 @@ function PartnerDetails({ item, open, onClose, onExport, exporting }) {
       {[["Offers", item.offer_count], ["Claimed", item.claimed], ["Active", item.active], ["Redeemed", item.redeemed], ["Expired", item.expired], ["Unique students", item.unique_students]].map(([label, value]) => <div key={label} className="rounded-xl bg-white/[0.04] p-3"><p className="text-xs text-zinc-500">{label}</p><p className="mt-1 text-xl font-bold">{value}</p></div>)}
     </div>
     <div><h3 className="font-display text-lg font-bold">Offer performance</h3><div className="mt-3 overflow-x-auto rounded-2xl border border-white/10"><table className="w-full min-w-[820px] text-left text-sm"><thead className="border-b border-white/10 bg-white/[0.03] text-xs uppercase tracking-wider text-zinc-500"><tr><th className="p-4">Offer</th><th className="p-4">Claimed</th><th className="p-4">Active</th><th className="p-4">Redeemed</th><th className="p-4">Expired</th><th className="p-4">Students</th><th className="p-4">Rate</th></tr></thead><tbody>{item.offers.length ? item.offers.map((offer) => <tr key={offer.id} className="border-b border-white/[0.06] last:border-0"><td className="p-4"><p className="font-semibold">{offer.title}</p><p className="text-xs text-zinc-500">{offer.discount || "—"}</p></td><td className="p-4">{offer.claimed}</td><td className="p-4 text-amber-200">{offer.active}</td><td className="p-4 text-emerald-300">{offer.redeemed}</td><td className="p-4 text-zinc-400">{offer.expired}</td><td className="p-4">{offer.unique_students}</td><td className="p-4">{offer.redemption_rate}%</td></tr>) : <tr><td colSpan="7" className="p-8 text-center text-zinc-500">No offers are currently linked to this partner.</td></tr>}</tbody></table></div></div>
-    <div><h3 className="font-display text-lg font-bold">Recent coupon activity</h3><div className="mt-3 overflow-x-auto rounded-2xl border border-white/10"><table className="w-full min-w-[720px] text-left text-sm"><thead className="border-b border-white/10 bg-white/[0.03] text-xs uppercase tracking-wider text-zinc-500"><tr><th className="p-4">Coupon</th><th className="p-4">Offer</th><th className="p-4">Status</th><th className="p-4">Claimed</th><th className="p-4">Redeemed</th></tr></thead><tbody>{item.recent_activity.length ? item.recent_activity.map((activity) => <tr key={activity.id} className="border-b border-white/[0.06] last:border-0"><td className="p-4 font-mono text-xs">{activity.code || "—"}</td><td className="p-4">{activity.offer_title || "—"}</td><td className="p-4"><StatusBadge status={activity.status} /></td><td className="p-4 text-xs text-zinc-400">{dateText(activity.claimed_at)}</td><td className="p-4 text-xs text-zinc-400">{dateText(activity.redeemed_at)}</td></tr>) : <tr><td colSpan="5" className="p-8 text-center text-zinc-500">No coupons were claimed in this period.</td></tr>}</tbody></table></div></div>
+    <div><h3 className="font-display text-lg font-bold">Recent offer activity</h3><div className="mt-3 overflow-x-auto rounded-2xl border border-white/10"><table className="w-full min-w-[720px] text-left text-sm"><thead className="border-b border-white/10 bg-white/[0.03] text-xs uppercase tracking-wider text-zinc-500"><tr><th className="p-4">Reference</th><th className="p-4">Offer</th><th className="p-4">Status</th><th className="p-4">Claimed</th><th className="p-4">Redeemed</th></tr></thead><tbody>{item.recent_activity.length ? item.recent_activity.map((activity) => <tr key={activity.id} className="border-b border-white/[0.06] last:border-0"><td className="p-4 font-mono text-xs">{activity.code || "Listed offer"}</td><td className="p-4">{activity.offer_title || "—"}</td><td className="p-4"><StatusBadge status={activity.status} /></td><td className="p-4 text-xs text-zinc-400">{dateText(activity.claimed_at)}</td><td className="p-4 text-xs text-zinc-400">{dateText(activity.redeemed_at)}</td></tr>) : <tr><td colSpan="5" className="p-8 text-center text-zinc-500">No offer activity was recorded in this period.</td></tr>}</tbody></table></div></div>
   </DialogContent></Dialog>;
 }
 
@@ -100,7 +101,7 @@ export default function AdminBrandsOutletsPage() {
         date_from: dateFrom || undefined, date_to: dateTo || undefined,
       }, responseType: "blob" });
       const disposition = response.headers["content-disposition"] || "";
-      const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] || `${item.name}-coupon-report.csv`;
+      const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] || `${item.name}-offer-report.csv`;
       const url = URL.createObjectURL(response.data);
       const link = document.createElement("a");
       link.href = url;
@@ -116,16 +117,16 @@ export default function AdminBrandsOutletsPage() {
   };
   const summary = report.data?.summary || {};
   return <>
-    <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between"><div><p className="text-xs uppercase tracking-[0.25em] text-indigo-300">Partner performance</p><h1 className="font-display mt-2 text-3xl font-extrabold">Brands & Outlets</h1><p className="mt-2 text-sm text-zinc-400">Track offer reach, coupon status, and redemptions for every partner.</p></div><div className="relative w-full lg:w-80"><Search size={16} className="absolute left-3 top-3 text-zinc-500" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search partner or location" className="w-full rounded-xl border border-white/10 bg-white/[0.04] py-2.5 pl-9 pr-3 text-sm outline-none focus:border-indigo-400" /></div></div>
+    <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between"><div><p className="text-xs uppercase tracking-[0.25em] text-indigo-300">Offer performance</p><h1 className="font-display mt-2 text-3xl font-extrabold">Brands & Outlets</h1><p className="mt-2 text-sm text-zinc-400">Track listed-brand claims separately from partner-outlet coupon redemptions.</p></div><div className="relative w-full lg:w-80"><Search size={16} className="absolute left-3 top-3 text-zinc-500" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search brand, outlet or location" className="w-full rounded-xl border border-white/10 bg-white/[0.04] py-2.5 pl-9 pr-3 text-sm outline-none focus:border-indigo-400" /></div></div>
     <div className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
       <MetricCard label="Partners" value={report.isLoading ? "—" : summary.entities || 0} icon={Building2} tint="text-indigo-300" />
       <MetricCard label="Offers" value={report.isLoading ? "—" : summary.offers || 0} icon={Store} tint="text-violet-300" />
-      <MetricCard label="Coupons claimed" value={report.isLoading ? "—" : summary.claimed || 0} icon={UsersRound} tint="text-sky-300" />
+      <MetricCard label="Offers claimed" value={report.isLoading ? "—" : summary.claimed || 0} icon={UsersRound} tint="text-sky-300" />
       <MetricCard label="Active" value={report.isLoading ? "—" : summary.active || 0} icon={Clock3} tint="text-amber-300" />
       <MetricCard label="Redeemed" value={report.isLoading ? "—" : summary.redeemed || 0} icon={TicketCheck} tint="text-emerald-300" />
     </div>
     <div className="mt-7 grid gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:grid-cols-2 xl:grid-cols-4">
-      <select value={type} onChange={(event) => { setType(event.target.value); setCity(""); }} className="rounded-xl border border-white/10 bg-[#17171b] px-3 py-2.5 text-sm"><option value="all">All partner types</option><option value="outlet">Outlets</option><option value="brand">Online brands</option></select>
+      <select value={type} onChange={(event) => { setType(event.target.value); setCity(""); }} className="rounded-xl border border-white/10 bg-[#17171b] px-3 py-2.5 text-sm"><option value="all">All offer types</option><option value="outlet">Partner outlets</option><option value="brand">Listed brands</option></select>
       <select value={city} onChange={(event) => setCity(event.target.value)} disabled={type === "brand"} className="rounded-xl border border-white/10 bg-[#17171b] px-3 py-2.5 text-sm disabled:opacity-50"><option value="">All cities</option>{report.data?.cities?.map((name) => <option key={name} value={name}>{name}</option>)}</select>
       <label className="flex items-center gap-2 rounded-xl border border-white/10 bg-[#17171b] px-3 text-xs text-zinc-400">From <input aria-label="Report from date" type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} className="min-w-0 flex-1 bg-transparent py-2.5 text-sm text-white outline-none" /></label>
       <label className="flex items-center gap-2 rounded-xl border border-white/10 bg-[#17171b] px-3 text-xs text-zinc-400">To <input aria-label="Report to date" type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} className="min-w-0 flex-1 bg-transparent py-2.5 text-sm text-white outline-none" /></label>
