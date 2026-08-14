@@ -41,7 +41,8 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, EmailStr, Field
-from pymongo.errors import DuplicateKeyError
+from pymongo import ReturnDocument
+from pymongo.errors import BulkWriteError, DuplicateKeyError
 from services.cloudinary_service import (
     CloudinaryUploadError,
     InvalidVerificationImage,
@@ -65,6 +66,10 @@ INDIA_TIMEZONE = ZoneInfo("Asia/Kolkata")
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 FROM_EMAIL = os.environ.get("FROM_EMAIL", "onboarding@resend.dev")
+PUBLIC_API_URL = os.environ.get("PUBLIC_API_URL", FRONTEND_URL).rstrip("/")
+EMAIL_CAMPAIGN_RATE_PER_SECOND = max(
+    1, min(20, int(os.environ.get("EMAIL_CAMPAIGN_RATE_PER_SECOND", "2")))
+)
 BRAND_OFFER_DISCLAIMER = (
     "SavvyCampusDeals helps students discover this publicly available offer. "
     "Eligibility, verification, availability and fulfilment are managed by the "
@@ -133,21 +138,21 @@ SAVVY_POINT_TIERS = [
     {
         "key": "deal_hunter",
         "name": "Deal Hunter",
-        "minimum": 700,
+        "minimum": 1000,
         "benefit": "Your first real level reward is ready to enjoy.",
         "reward": "One free cold coffee, iced tea, lemonade, or similar drink.",
     },
     {
         "key": "savvy_insider",
         "name": "Savvy Insider",
-        "minimum": 2000,
+        "minimum": 3000,
         "benefit": "A bigger campus treat for a true Savvy regular.",
         "reward": "One free drink, one free pizza, and a voucher worth up to ₹150.",
     },
     {
         "key": "campus_icon",
         "name": "Campus Icon",
-        "minimum": 5000,
+        "minimum": 8000,
         "benefit": "You've unlocked the biggest Savvy milestone reward.",
         "reward": "One laptop bag, one water bottle, and a voucher worth up to ₹300.",
     },
@@ -873,6 +878,36 @@ class AdminAnnouncementIn(BaseModel):
     image_url: Optional[str] = Field(default="", max_length=1000)
     starts_at: Optional[datetime] = None
     published: bool = False
+
+
+class AdminEmailCampaignIn(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
+    subject: str = Field(min_length=2, max_length=150)
+    preview_text: Optional[str] = Field(default="", max_length=180)
+    heading: str = Field(min_length=2, max_length=120)
+    message: str = Field(min_length=2, max_length=2000)
+    eyebrow: Optional[str] = Field(default="SAVVY CAMPUS UPDATE", max_length=60)
+    cta_label: Optional[str] = Field(default="", max_length=40)
+    cta_url: Optional[str] = Field(default="", max_length=300)
+    image_url: Optional[str] = Field(default="", max_length=1000)
+    audience: str = Field(default="approved_students", max_length=40)
+    scheduled_at: Optional[datetime] = None
+    background_color: str = Field(default="#050706", max_length=7)
+    card_color: str = Field(default="#083f46", max_length=7)
+    accent_color: str = Field(default="#2dd4bf", max_length=7)
+    text_color: str = Field(default="#ffffff", max_length=7)
+    muted_color: str = Field(default="#c7dedb", max_length=7)
+    button_text_color: str = Field(default="#042f2e", max_length=7)
+    corner_style: str = Field(default="rounded", max_length=20)
+
+
+class AdminEmailCampaignTestIn(BaseModel):
+    email: EmailStr
+
+
+class AdminEmailCampaignLaunchIn(BaseModel):
+    recipient_count: int = Field(ge=0)
+    confirmation: str = Field(min_length=4, max_length=20)
 
 
 class OtpVerifyIn(BaseModel):
@@ -2010,6 +2045,15 @@ def serialize_admin_verification(doc: dict, include_images: bool = False) -> dic
 ANNOUNCEMENT_CATEGORIES = {"new", "important", "limited"}
 ANNOUNCEMENT_AUDIENCES = {"everyone", "students", "partners"}
 ANNOUNCEMENT_LIFETIME_DAYS = 5
+EMAIL_CAMPAIGN_AUDIENCES = {
+    "approved_students",
+    "email_verified_students",
+    "all_students",
+}
+EMAIL_CAMPAIGN_CORNER_STYLES = {"soft", "rounded", "pill"}
+EMAIL_CAMPAIGN_EDITABLE_STATUSES = {"draft", "cancelled"}
+_email_campaign_tasks: set[asyncio.Task] = set()
+_running_email_campaigns: set[str] = set()
 
 
 def _validated_announcement_payload(body: AdminAnnouncementIn) -> dict:
@@ -2101,6 +2145,245 @@ def _announcement_audiences_for(user: dict) -> list[str]:
     if user.get("role") == "outlet_partner":
         return ["everyone", "partners"]
     return []
+
+
+def _campaign_audience_query(audience: str) -> dict:
+    query: dict = {
+        "role": "student",
+        "email": {"$type": "string", "$ne": ""},
+        "marketing_email_opt_out": {"$ne": True},
+    }
+    if audience == "approved_students":
+        query.update({"email_verified": True, "verification_status": "approved"})
+    elif audience == "email_verified_students":
+        query["email_verified"] = True
+    elif audience != "all_students":
+        raise HTTPException(400, "Invalid email campaign audience")
+    return query
+
+
+def _validate_hex_color(value: str, label: str) -> str:
+    color = value.strip().lower()
+    if not re.fullmatch(r"#[0-9a-f]{6}", color):
+        raise HTTPException(400, f"{label} must be a six-digit hex colour")
+    return color
+
+
+def _validated_email_campaign_payload(body: AdminEmailCampaignIn) -> dict:
+    if body.audience not in EMAIL_CAMPAIGN_AUDIENCES:
+        raise HTTPException(400, "Invalid email campaign audience")
+    if body.corner_style not in EMAIL_CAMPAIGN_CORNER_STYLES:
+        raise HTTPException(400, "Invalid email corner style")
+    cta_label = (body.cta_label or "").strip()
+    cta_url = (body.cta_url or "").strip()
+    if bool(cta_label) != bool(cta_url):
+        raise HTTPException(400, "CTA label and destination must be provided together")
+    if cta_url and not (cta_url.startswith("/") or cta_url.startswith("https://")):
+        raise HTTPException(400, "CTA destination must be a site path or HTTPS URL")
+    image_url = (body.image_url or "").strip()
+    if image_url and not image_url.startswith("https://"):
+        raise HTTPException(400, "Campaign artwork must use an HTTPS URL")
+    return {
+        "name": body.name.strip(),
+        "subject": body.subject.strip(),
+        "preview_text": (body.preview_text or "").strip(),
+        "heading": body.heading.strip(),
+        "message": body.message.strip(),
+        "eyebrow": (body.eyebrow or "").strip(),
+        "cta_label": cta_label,
+        "cta_url": cta_url,
+        "image_url": image_url,
+        "audience": body.audience,
+        "scheduled_at": _aware(body.scheduled_at),
+        "background_color": _validate_hex_color(body.background_color, "Background colour"),
+        "card_color": _validate_hex_color(body.card_color, "Card colour"),
+        "accent_color": _validate_hex_color(body.accent_color, "Accent colour"),
+        "text_color": _validate_hex_color(body.text_color, "Text colour"),
+        "muted_color": _validate_hex_color(body.muted_color, "Muted colour"),
+        "button_text_color": _validate_hex_color(body.button_text_color, "Button text colour"),
+        "corner_style": body.corner_style,
+    }
+
+
+def _campaign_unsubscribe_token(user_id: ObjectId) -> str:
+    encoded_id = base64.urlsafe_b64encode(user_id.binary).decode().rstrip("=")
+    signature = hmac.new(
+        JWT_SECRET.encode(), f"email-unsubscribe:{encoded_id}".encode(), hashlib.sha256
+    ).digest()[:20]
+    encoded_signature = base64.urlsafe_b64encode(signature).decode().rstrip("=")
+    return f"{encoded_id}.{encoded_signature}"
+
+
+def _decode_campaign_unsubscribe_token(token: str) -> ObjectId:
+    try:
+        encoded_id, encoded_signature = token.split(".", 1)
+        supplied = base64.urlsafe_b64decode(
+            encoded_signature + "=" * (-len(encoded_signature) % 4)
+        )
+        expected = hmac.new(
+            JWT_SECRET.encode(),
+            f"email-unsubscribe:{encoded_id}".encode(),
+            hashlib.sha256,
+        ).digest()[:20]
+        if not hmac.compare_digest(expected, supplied):
+            raise ValueError
+        raw_id = base64.urlsafe_b64decode(encoded_id + "=" * (-len(encoded_id) % 4))
+        return ObjectId(raw_id)
+    except Exception:
+        raise HTTPException(400, "This unsubscribe link is invalid")
+
+
+def email_campaign_html(
+    campaign: dict,
+    recipient_name: str = "there",
+    unsubscribe_url: str = "",
+) -> str:
+    """Build portable, inline-styled HTML for both preview and delivery."""
+    radius = {"soft": "12px", "rounded": "24px", "pill": "34px"}.get(
+        campaign.get("corner_style"), "24px"
+    )
+    background = campaign.get("background_color", "#050706")
+    card = campaign.get("card_color", "#083f46")
+    accent = campaign.get("accent_color", "#2dd4bf")
+    text = campaign.get("text_color", "#ffffff")
+    muted = campaign.get("muted_color", "#c7dedb")
+    button_text = campaign.get("button_text_color", "#042f2e")
+    preview = html.escape(campaign.get("preview_text", ""))
+    image_url = campaign.get("image_url", "")
+    image = (
+        f'<img src="{html.escape(image_url, quote=True)}" alt="" width="600" '
+        f'style="display:block;width:100%;max-height:330px;object-fit:cover;border-radius:{radius};margin:0 0 28px" />'
+        if image_url
+        else ""
+    )
+    cta_url = campaign.get("cta_url", "")
+    if cta_url.startswith("/"):
+        cta_url = f"{FRONTEND_URL.rstrip('/')}{cta_url}"
+    cta = (
+        f'<a href="{html.escape(cta_url, quote=True)}" style="display:inline-block;background:{accent};'
+        f'color:{button_text};padding:14px 22px;border-radius:{radius};font-weight:800;text-decoration:none">'
+        f'{html.escape(campaign.get("cta_label", ""))}</a>'
+        if cta_url and campaign.get("cta_label")
+        else ""
+    )
+    unsubscribe = (
+        f'<a href="{html.escape(unsubscribe_url, quote=True)}" style="color:{muted};text-decoration:underline">Unsubscribe</a>'
+        if unsubscribe_url
+        else "Email preferences are managed by SavvyCampusDeals."
+    )
+    safe_message = html.escape(campaign.get("message", "")).replace("\n", "<br />")
+    return f"""<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1" /></head>
+    <body style="margin:0;background:{background};font-family:Manrope,Arial,sans-serif;color:{text}">
+      <div style="display:none;max-height:0;overflow:hidden;opacity:0">{preview}</div>
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:{background};padding:32px 14px"><tr><td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;background:{card};border:1px solid {accent}55;border-radius:{radius};overflow:hidden;box-shadow:0 24px 70px rgba(0,0,0,.28)">
+          <tr><td style="padding:38px 34px 34px">
+            <div style="font-size:12px;font-weight:800;letter-spacing:2.4px;color:{accent};text-transform:uppercase">{html.escape(campaign.get("eyebrow", ""))}</div>
+            <div style="margin:16px 0 26px;height:3px;width:48px;background:{accent};border-radius:99px"></div>
+            {image}
+            <div style="font-size:14px;color:{muted};margin-bottom:12px">Hey {html.escape(recipient_name or 'there')},</div>
+            <h1 style="margin:0;font-family:Outfit,Arial,sans-serif;font-size:38px;line-height:1.08;letter-spacing:-1px;color:{text}">{html.escape(campaign.get("heading", ""))}</h1>
+            <p style="margin:20px 0 0;font-size:16px;line-height:1.75;color:{muted}">{safe_message}</p>
+            <div style="margin-top:28px">{cta}</div>
+          </td></tr>
+          <tr><td style="border-top:1px solid {accent}33;padding:22px 34px;color:{muted};font-size:11px;line-height:1.6">
+            Sent by SavvyCampusDeals · Student perks, made better.<br />{unsubscribe}
+          </td></tr>
+        </table>
+      </td></tr></table>
+    </body></html>"""
+
+
+def serialize_email_campaign(campaign: dict) -> dict:
+    result = {
+        key: campaign.get(key, "")
+        for key in (
+            "name", "subject", "preview_text", "heading", "message", "eyebrow",
+            "cta_label", "cta_url", "image_url", "audience", "background_color",
+            "card_color", "accent_color", "text_color", "muted_color",
+            "button_text_color", "corner_style", "status", "last_error",
+        )
+    }
+    result.update(
+        {
+            "id": str(campaign["_id"]),
+            "scheduled_at": _admin_datetime(campaign.get("scheduled_at")),
+            "created_at": _admin_datetime(campaign.get("created_at")),
+            "updated_at": _admin_datetime(campaign.get("updated_at")),
+            "started_at": _admin_datetime(campaign.get("started_at")),
+            "completed_at": _admin_datetime(campaign.get("completed_at")),
+            "stats": campaign.get(
+                "stats", {"recipients": 0, "pending": 0, "sent": 0, "failed": 0}
+            ),
+        }
+    )
+    return result
+
+
+def _track_email_campaign_task(task: asyncio.Task):
+    _email_campaign_tasks.add(task)
+    task.add_done_callback(_email_campaign_tasks.discard)
+
+
+async def _run_email_campaign(campaign_id: ObjectId):
+    campaign_key = str(campaign_id)
+    if campaign_key in _running_email_campaigns:
+        return
+    _running_email_campaigns.add(campaign_key)
+    try:
+        while True:
+            campaign = await db.email_campaigns.find_one({"_id": campaign_id})
+            if not campaign or campaign.get("status") not in {"queued", "scheduled", "sending"}:
+                return
+            scheduled_at = _aware(campaign.get("scheduled_at"))
+            now = datetime.now(timezone.utc)
+            if scheduled_at and scheduled_at > now:
+                await asyncio.sleep(min((scheduled_at - now).total_seconds(), 60))
+                continue
+            await db.email_campaigns.update_one(
+                {"_id": campaign_id, "status": {"$in": ["queued", "scheduled", "sending"]}},
+                {"$set": {"status": "sending", "started_at": campaign.get("started_at") or now}},
+            )
+            receipt = await db.email_campaign_recipients.find_one_and_update(
+                {"campaign_id": campaign_id, "status": "pending"},
+                {"$set": {"status": "sending", "attempted_at": now}},
+                sort=[("created_at", 1)],
+                return_document=ReturnDocument.AFTER,
+            )
+            if not receipt:
+                await db.email_campaigns.update_one(
+                    {"_id": campaign_id, "status": "sending"},
+                    {"$set": {"status": "completed", "completed_at": now, "stats.pending": 0}},
+                )
+                return
+            unsubscribe_url = (
+                f"{PUBLIC_API_URL}/api/email/unsubscribe?token="
+                f"{_campaign_unsubscribe_token(receipt['user_id'])}"
+            )
+            rendered = email_campaign_html(
+                campaign, receipt.get("name") or "there", unsubscribe_url
+            )
+            outcome = await asyncio.to_thread(
+                send_email, receipt["email"], campaign["subject"], rendered
+            )
+            final_status = "sent" if outcome["ok"] else "failed"
+            await db.email_campaign_recipients.update_one(
+                {"_id": receipt["_id"], "status": "sending"},
+                {"$set": {"status": final_status, "sent_at": datetime.now(timezone.utc) if outcome["ok"] else None, "error": outcome.get("error") or ""}},
+            )
+            await db.email_campaigns.update_one(
+                {"_id": campaign_id},
+                {"$inc": {f"stats.{final_status}": 1, "stats.pending": -1}},
+            )
+            await asyncio.sleep(1 / EMAIL_CAMPAIGN_RATE_PER_SECOND)
+    except Exception as exc:
+        logger.exception("Email campaign worker failed")
+        await db.email_campaigns.update_one(
+            {"_id": campaign_id},
+            {"$set": {"status": "paused", "last_error": str(exc), "updated_at": datetime.now(timezone.utc)}},
+        )
+    finally:
+        _running_email_campaigns.discard(campaign_key)
 
 
 async def _review_pending_verification(
@@ -2434,6 +2717,254 @@ async def admin_delete_announcement(
         raise HTTPException(404, "Announcement not found")
     await db.announcement_receipts.delete_many({"announcement_id": announcement_oid})
     return {"ok": True}
+
+
+@api.get("/email/unsubscribe")
+async def unsubscribe_from_campaigns(token: str = Query(..., min_length=20, max_length=200)):
+    user_id = _decode_campaign_unsubscribe_token(token)
+    result = await db.users.update_one(
+        {"_id": user_id, "role": "student"},
+        {"$set": {"marketing_email_opt_out": True, "marketing_email_opted_out_at": datetime.now(timezone.utc)}},
+    )
+    heading = "You’re unsubscribed" if result.matched_count else "Preference not found"
+    message = (
+        "You will no longer receive Savvy product and promotional emails. Essential account and security emails are unaffected."
+        if result.matched_count
+        else "We could not find an active student preference for this link."
+    )
+    return Response(
+        content=f"""<!doctype html><html><body style="margin:0;background:#050505;color:#fff;font-family:Arial,sans-serif;display:grid;min-height:100vh;place-items:center"><main style="max-width:520px;padding:40px;text-align:center"><div style="font-size:13px;letter-spacing:2px;color:#5eead4">SAVVY CAMPUS</div><h1>{heading}</h1><p style="color:#b4b4bd;line-height:1.7">{message}</p><a href="{html.escape(FRONTEND_URL)}" style="display:inline-block;margin-top:16px;background:#fff;color:#111;padding:12px 20px;border-radius:999px;text-decoration:none;font-weight:700">Back to Savvy</a></main></body></html>""",
+        media_type="text/html",
+    )
+
+
+@api.get("/admin/email-campaigns/audience-count")
+async def admin_email_campaign_audience_count(
+    audience: str = Query("approved_students", max_length=40),
+    admin=Depends(get_admin_user),
+):
+    return {
+        "audience": audience,
+        "count": await db.users.count_documents(_campaign_audience_query(audience)),
+    }
+
+
+@api.get("/admin/email-campaigns")
+async def admin_email_campaigns(admin=Depends(get_admin_user)):
+    campaigns = await db.email_campaigns.find({}).sort("created_at", -1).to_list(200)
+    return {"items": [serialize_email_campaign(item) for item in campaigns]}
+
+
+@api.post("/admin/email-campaigns")
+async def admin_create_email_campaign(
+    body: AdminEmailCampaignIn, admin=Depends(get_admin_user)
+):
+    now = datetime.now(timezone.utc)
+    document = {
+        **_validated_email_campaign_payload(body),
+        "status": "draft",
+        "stats": {"recipients": 0, "pending": 0, "sent": 0, "failed": 0},
+        "created_at": now,
+        "updated_at": now,
+        "created_by": admin["_id"],
+    }
+    result = await db.email_campaigns.insert_one(document)
+    document["_id"] = result.inserted_id
+    return serialize_email_campaign(document)
+
+
+@api.put("/admin/email-campaigns/{campaign_id}")
+async def admin_update_email_campaign(
+    campaign_id: str,
+    body: AdminEmailCampaignIn,
+    admin=Depends(get_admin_user),
+):
+    try:
+        campaign_oid = ObjectId(campaign_id)
+    except Exception:
+        raise HTTPException(404, "Email campaign not found")
+    campaign = await db.email_campaigns.find_one({"_id": campaign_oid})
+    if not campaign:
+        raise HTTPException(404, "Email campaign not found")
+    if campaign.get("status") not in EMAIL_CAMPAIGN_EDITABLE_STATUSES:
+        raise HTTPException(409, "A queued or completed campaign can no longer be edited")
+    updates = {
+        **_validated_email_campaign_payload(body),
+        "status": "draft",
+        "updated_at": datetime.now(timezone.utc),
+        "updated_by": admin["_id"],
+        "last_error": "",
+    }
+    await db.email_campaigns.update_one({"_id": campaign_oid}, {"$set": updates})
+    fresh = await db.email_campaigns.find_one({"_id": campaign_oid})
+    return serialize_email_campaign(fresh)
+
+
+@api.delete("/admin/email-campaigns/{campaign_id}")
+async def admin_delete_email_campaign(
+    campaign_id: str, admin=Depends(get_admin_user)
+):
+    try:
+        campaign_oid = ObjectId(campaign_id)
+    except Exception:
+        raise HTTPException(404, "Email campaign not found")
+    result = await db.email_campaigns.delete_one(
+        {"_id": campaign_oid, "status": {"$in": list(EMAIL_CAMPAIGN_EDITABLE_STATUSES)}}
+    )
+    if not result.deleted_count:
+        raise HTTPException(409, "Only draft or cancelled campaigns can be deleted")
+    await db.email_campaign_recipients.delete_many({"campaign_id": campaign_oid})
+    return {"ok": True}
+
+
+@api.post("/admin/email-campaigns/{campaign_id}/test")
+async def admin_test_email_campaign(
+    campaign_id: str,
+    body: AdminEmailCampaignTestIn,
+    admin=Depends(get_admin_user),
+):
+    try:
+        campaign_oid = ObjectId(campaign_id)
+    except Exception:
+        raise HTTPException(404, "Email campaign not found")
+    campaign = await db.email_campaigns.find_one({"_id": campaign_oid})
+    if not campaign:
+        raise HTTPException(404, "Email campaign not found")
+    rendered = email_campaign_html(campaign, "Savvy Admin")
+    outcome = await asyncio.to_thread(
+        send_email, str(body.email), f"[TEST] {campaign['subject']}", rendered
+    )
+    await db.email_campaigns.update_one(
+        {"_id": campaign_oid},
+        {"$set": {"last_test_at": datetime.now(timezone.utc), "last_test_email": str(body.email), "last_test_ok": outcome["ok"]}},
+    )
+    if not outcome["ok"]:
+        raise HTTPException(502, f"Test email could not be sent: {outcome.get('error') or 'provider error'}")
+    return {"ok": True, "email": str(body.email)}
+
+
+@api.post("/admin/email-campaigns/{campaign_id}/launch")
+async def admin_launch_email_campaign(
+    campaign_id: str,
+    body: AdminEmailCampaignLaunchIn,
+    admin=Depends(get_admin_user),
+):
+    try:
+        campaign_oid = ObjectId(campaign_id)
+    except Exception:
+        raise HTTPException(404, "Email campaign not found")
+    campaign = await db.email_campaigns.find_one({"_id": campaign_oid})
+    if not campaign:
+        raise HTTPException(404, "Email campaign not found")
+    if campaign.get("status") != "draft":
+        raise HTTPException(409, "Only a draft campaign can be launched")
+    if body.confirmation.strip().upper() != "SEND":
+        raise HTTPException(400, "Type SEND to confirm this campaign")
+    locked = await db.email_campaigns.update_one(
+        {"_id": campaign_oid, "status": "draft"},
+        {"$set": {"status": "preparing", "updated_at": datetime.now(timezone.utc)}},
+    )
+    if not locked.matched_count:
+        raise HTTPException(409, "This campaign is already being prepared or sent")
+    recipients = await db.users.find(
+        _campaign_audience_query(campaign["audience"]),
+        {"name": 1, "email": 1},
+    ).to_list(None)
+    if len(recipients) != body.recipient_count:
+        await db.email_campaigns.update_one(
+            {"_id": campaign_oid, "status": "preparing"},
+            {"$set": {"status": "draft"}},
+        )
+        raise HTTPException(
+            409,
+            f"The audience changed. Review the updated recipient count ({len(recipients)}) before sending.",
+        )
+    if not recipients:
+        await db.email_campaigns.update_one(
+            {"_id": campaign_oid, "status": "preparing"},
+            {"$set": {"status": "draft"}},
+        )
+        raise HTTPException(400, "This audience currently has no eligible recipients")
+    now = datetime.now(timezone.utc)
+    await db.email_campaign_recipients.delete_many({"campaign_id": campaign_oid})
+    try:
+        await db.email_campaign_recipients.insert_many(
+            [
+                {
+                    "campaign_id": campaign_oid,
+                    "user_id": user["_id"],
+                    "email": user["email"],
+                    "name": user.get("name", ""),
+                    "status": "pending",
+                    "created_at": now,
+                }
+                for user in recipients
+            ],
+            ordered=False,
+        )
+    except BulkWriteError as exc:
+        logger.warning(f"Campaign recipient dedupe: {exc.details.get('nInserted', 0)} inserted")
+    scheduled_at = _aware(campaign.get("scheduled_at"))
+    status = "scheduled" if scheduled_at and scheduled_at > now else "queued"
+    changed = await db.email_campaigns.update_one(
+        {"_id": campaign_oid, "status": "preparing"},
+        {"$set": {"status": status, "launched_at": now, "launched_by": admin["_id"], "stats": {"recipients": len(recipients), "pending": len(recipients), "sent": 0, "failed": 0}}},
+    )
+    if not changed.matched_count:
+        raise HTTPException(409, "This campaign could not be launched")
+    _track_email_campaign_task(asyncio.create_task(_run_email_campaign(campaign_oid)))
+    fresh = await db.email_campaigns.find_one({"_id": campaign_oid})
+    return serialize_email_campaign(fresh)
+
+
+@api.post("/admin/email-campaigns/{campaign_id}/cancel")
+async def admin_cancel_email_campaign(
+    campaign_id: str, admin=Depends(get_admin_user)
+):
+    try:
+        campaign_oid = ObjectId(campaign_id)
+    except Exception:
+        raise HTTPException(404, "Email campaign not found")
+    result = await db.email_campaigns.update_one(
+        {"_id": campaign_oid, "status": {"$in": ["queued", "scheduled", "sending", "paused"]}},
+        {"$set": {"status": "cancelled", "cancelled_at": datetime.now(timezone.utc), "cancelled_by": admin["_id"]}},
+    )
+    if not result.matched_count:
+        raise HTTPException(409, "This campaign cannot be cancelled")
+    cancelled = await db.email_campaign_recipients.update_many(
+        {"campaign_id": campaign_oid, "status": "pending"},
+        {"$set": {"status": "cancelled"}},
+    )
+    if cancelled.modified_count:
+        await db.email_campaigns.update_one(
+            {"_id": campaign_oid},
+            {"$inc": {"stats.pending": -cancelled.modified_count}},
+        )
+    fresh = await db.email_campaigns.find_one({"_id": campaign_oid})
+    return serialize_email_campaign(fresh)
+
+
+@api.post("/admin/email-campaigns/{campaign_id}/resume")
+async def admin_resume_email_campaign(
+    campaign_id: str, admin=Depends(get_admin_user)
+):
+    try:
+        campaign_oid = ObjectId(campaign_id)
+    except Exception:
+        raise HTTPException(404, "Email campaign not found")
+    result = await db.email_campaigns.update_one(
+        {"_id": campaign_oid, "status": "paused"},
+        {"$set": {"status": "queued", "last_error": "", "resumed_at": datetime.now(timezone.utc), "resumed_by": admin["_id"]}},
+    )
+    if not result.matched_count:
+        raise HTTPException(409, "Only a paused campaign can be resumed")
+    await db.email_campaign_recipients.update_many(
+        {"campaign_id": campaign_oid, "status": "sending"},
+        {"$set": {"status": "pending"}},
+    )
+    _track_email_campaign_task(asyncio.create_task(_run_email_campaign(campaign_oid)))
+    fresh = await db.email_campaigns.find_one({"_id": campaign_oid})
+    return serialize_email_campaign(fresh)
 
 
 @api.get("/admin/referrals")
@@ -5960,6 +6491,13 @@ async def on_startup():
         await db.announcement_receipts.create_index(
             [("announcement_id", 1), ("seen_at", 1), ("clicked_at", 1)]
         )
+        await db.email_campaigns.create_index([("status", 1), ("scheduled_at", 1)])
+        await db.email_campaign_recipients.create_index(
+            [("campaign_id", 1), ("user_id", 1)], unique=True
+        )
+        await db.email_campaign_recipients.create_index(
+            [("campaign_id", 1), ("status", 1), ("created_at", 1)]
+        )
         await db.outlet_daily_redemptions.create_index(
             [("user_id", 1), ("outlet_id", 1), ("day", 1)], unique=True
         )
@@ -5995,6 +6533,22 @@ async def on_startup():
     await migrate_savvy_points()
     await seed_offers()
     await seed_outlets()
+    # Resume durable campaign jobs after a process restart. Any recipient left in
+    # the transient sending state is safe to claim again from its persisted row.
+    try:
+        resumable = await db.email_campaigns.find(
+            {"status": {"$in": ["queued", "scheduled", "sending"]}}, {"_id": 1}
+        ).to_list(200)
+        for campaign in resumable:
+            await db.email_campaign_recipients.update_many(
+                {"campaign_id": campaign["_id"], "status": "sending"},
+                {"$set": {"status": "pending"}},
+            )
+            _track_email_campaign_task(
+                asyncio.create_task(_run_email_campaign(campaign["_id"]))
+            )
+    except Exception as e:
+        logger.warning(f"Email campaign resume warn: {e}")
     # Migrate existing coupons + student QRs from pipe-payload to URL format,
     # so that any phone camera scanning them opens our /scan page directly.
     try:
@@ -6035,4 +6589,8 @@ app.add_middleware(
 
 @app.on_event("shutdown")
 async def shutdown():
+    for task in list(_email_campaign_tasks):
+        task.cancel()
+    if _email_campaign_tasks:
+        await asyncio.gather(*_email_campaign_tasks, return_exceptions=True)
     client.close()

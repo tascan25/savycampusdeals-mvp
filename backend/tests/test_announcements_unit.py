@@ -154,8 +154,8 @@ def test_admin_student_serializer_exposes_balance_lifetime_and_tier():
         "_id": ObjectId(),
         "email": "student@example.com",
         "savvy_points_balance": 1850,
-        "savvy_points_lifetime": 2100,
+        "savvy_points_lifetime": 3100,
     })
     assert serialized["savvy_points_balance"] == 1850
-    assert serialized["savvy_points_lifetime"] == 2100
+    assert serialized["savvy_points_lifetime"] == 3100
     assert serialized["savvy_tier"] == "Savvy Insider"

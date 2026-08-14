@@ -52,7 +52,10 @@ function LoadingHub() {
   );
 }
 
-function CampusIconCardPreview({ unlocked }) {
+function CampusIconCardPreview({ unlocked, threshold }) {
+  const thresholdLabel = threshold >= 1000 && threshold % 1000 === 0
+    ? `${threshold / 1000}K`
+    : threshold.toLocaleString("en-IN");
   return (
     <div className="mt-8" data-testid="campus-icon-card-preview">
       <div className="mb-3 flex items-center justify-between gap-3">
@@ -91,7 +94,7 @@ function CampusIconCardPreview({ unlocked }) {
                   <Crown size={18} fill="currentColor" />
                 </div>
                 <div>
-                  <p className="font-display text-[11px] font-black tracking-[0.18em] text-amber-50 sm:text-xs">SAVY CAMPUS</p>
+                  <p className="font-display text-[11px] font-black tracking-[0.18em] text-amber-50 sm:text-xs">SAVVY CAMPUS</p>
                   <p className="mt-0.5 text-[7px] font-bold uppercase tracking-[0.28em] text-amber-300/60 sm:text-[8px]">Icon Society</p>
                 </div>
               </div>
@@ -107,7 +110,7 @@ function CampusIconCardPreview({ unlocked }) {
                   </p>
                 </div>
                 <div className="shrink-0 text-right">
-                  <p className="font-display text-lg font-black leading-none text-amber-100 sm:text-2xl">5K</p>
+                  <p className="font-display text-lg font-black leading-none text-amber-100 sm:text-2xl">{thresholdLabel}</p>
                   <p className="mt-1 text-[6px] font-bold uppercase tracking-[0.22em] text-amber-300/55 sm:text-[7px]">Club</p>
                 </div>
               </div>
@@ -115,7 +118,7 @@ function CampusIconCardPreview({ unlocked }) {
               <div className="mt-3 flex items-center justify-between gap-2 border-t border-amber-200/10 pt-3 sm:mt-4 sm:pt-4">
                 <p className="text-[7px] font-bold uppercase tracking-[0.18em] text-amber-50/55 sm:text-[8px]">Earned. Rare. Recognised.</p>
                 <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[7px] font-extrabold uppercase tracking-[0.12em] sm:px-2.5 sm:text-[8px] ${unlocked ? "border-emerald-300/25 bg-emerald-300/10 text-emerald-200" : "border-amber-200/15 bg-black/25 text-amber-100/75"}`}>
-                  {unlocked ? <Check size={9} /> : <LockKeyhole size={8} />} {unlocked ? "Icon status" : "5,000 points"}
+                  {unlocked ? <Check size={9} /> : <LockKeyhole size={8} />} {unlocked ? "Icon status" : `${threshold.toLocaleString("en-IN")} points`}
                 </span>
               </div>
             </div>
@@ -124,7 +127,7 @@ function CampusIconCardPreview({ unlocked }) {
       </motion.div>
 
       <p className="mt-3 text-center text-[10px] leading-relaxed text-zinc-500">
-        {unlocked ? "You made it. Your Campus Icon identity is now unlocked." : "Reach 5,000 lifetime Savvy Points to unlock Icon status."}
+        {unlocked ? "You made it. Your Campus Icon identity is now unlocked." : `Reach ${threshold.toLocaleString("en-IN")} lifetime Savvy Points to unlock Icon status.`}
       </p>
     </div>
   );
@@ -140,6 +143,7 @@ export default function SavvyPointsHub({ overview, loading }) {
     pending_referrals: pending = 0, level_rewards: levelRewards = [],
   } = overview;
   const nextName = tier.next_tier?.name;
+  const campusIconMinimum = overview.tiers.find((item) => item.key === "campus_icon")?.minimum ?? 8000;
   const rewardsByTier = Object.fromEntries(levelRewards.map((reward) => [reward.tier_key, reward]));
   const rewardTiers = overview.tiers.slice(1);
   const suggestedRewardTier = rewardTiers.slice().reverse().find((item) => rewardsByTier[item.key]?.status === "active")
@@ -187,7 +191,7 @@ export default function SavvyPointsHub({ overview, loading }) {
               <span className="pb-2 text-sm font-semibold text-zinc-400">Savvy Points</span>
             </div>
             <p className="mt-4 max-w-sm text-sm leading-relaxed text-zinc-400">{tier.benefit}</p>
-            <CampusIconCardPreview unlocked={lifetime >= 5000} />
+            <CampusIconCardPreview unlocked={lifetime >= campusIconMinimum} threshold={campusIconMinimum} />
           </div>
 
           <div className="self-end rounded-3xl border border-white/10 bg-black/20 p-5 backdrop-blur-sm sm:p-6">
