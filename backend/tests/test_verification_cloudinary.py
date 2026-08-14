@@ -1,4 +1,5 @@
 """Unit coverage for backward-compatible Cloudinary verification storage."""
+
 import asyncio
 import base64
 import os
@@ -60,12 +61,30 @@ class FakeUsers:
     async def update_one(self, query, update):
         if self.update_error:
             raise self.update_error
-        self.user.update(update["$set"])
+        self.user.update(update.get("$set", {}))
+        for key, value in update.get("$inc", {}).items():
+            self.user[key] = self.user.get(key, 0) + value
+        for key, value in update.get("$addToSet", {}).items():
+            if value not in self.user.setdefault(key, []):
+                self.user[key].append(value)
         self.updated = True
         return SimpleNamespace(matched_count=1)
 
     async def find_one(self, query):
         return self.user
+
+
+class FakePoints:
+    async def insert_one(self, document):
+        return SimpleNamespace(inserted_id=ObjectId())
+
+    async def update_one(self, query, update):
+        return SimpleNamespace(matched_count=1)
+
+
+class FakeReferrals:
+    async def find_one(self, query):
+        return None
 
 
 def manual_user():
@@ -99,7 +118,12 @@ def install_fake_db(monkeypatch, user, *, insert_error=None, update_error=None):
     monkeypatch.setattr(
         server,
         "db",
-        SimpleNamespace(verifications=verifications, users=users),
+        SimpleNamespace(
+            verifications=verifications,
+            users=users,
+            savvy_points_transactions=FakePoints(),
+            referrals=FakeReferrals(),
+        ),
     )
     monkeypatch.setattr(server, "send_email", lambda *args, **kwargs: None)
     return verifications, users
@@ -111,9 +135,7 @@ def test_validation_rejects_malformed_unsupported_and_mismatched_images():
             "data:image/png;base64,not-valid!"
         )
     with pytest.raises(cloudinary_service.InvalidVerificationImage):
-        cloudinary_service.validate_verification_image(
-            "data:image/gif;base64,R0lGODlh"
-        )
+        cloudinary_service.validate_verification_image("data:image/gif;base64,R0lGODlh")
     with pytest.raises(cloudinary_service.InvalidVerificationImage):
         cloudinary_service.validate_verification_image(
             image_data_uri("png", b"\xff\xd8\xffjpeg")
@@ -155,17 +177,21 @@ def test_upload_returns_only_secure_url_and_public_id(monkeypatch):
 def test_new_manual_submission_stores_urls_and_public_ids(monkeypatch):
     user = manual_user()
     verifications, users = install_fake_db(monkeypatch, user)
-    uploads = iter([
-        {
-            "secure_url": "https://res.cloudinary.com/demo/college.png",
-            "public_id": "verification/college",
-        },
-        {
-            "secure_url": "https://res.cloudinary.com/demo/selfie.jpg",
-            "public_id": "verification/selfie",
-        },
-    ])
-    monkeypatch.setattr(server, "upload_verification_image", lambda *a, **k: next(uploads))
+    uploads = iter(
+        [
+            {
+                "secure_url": "https://res.cloudinary.com/demo/college.png",
+                "public_id": "verification/college",
+            },
+            {
+                "secure_url": "https://res.cloudinary.com/demo/selfie.jpg",
+                "public_id": "verification/selfie",
+            },
+        ]
+    )
+    monkeypatch.setattr(
+        server, "upload_verification_image", lambda *a, **k: next(uploads)
+    )
 
     result = asyncio.run(server.submit_verification(submission(), user=user))
 
@@ -173,7 +199,9 @@ def test_new_manual_submission_stores_urls_and_public_ids(monkeypatch):
     assert users.updated is True
     assert verifications.inserted["college_id_image"].startswith("https://")
     assert verifications.inserted["selfie_image"].startswith("https://")
-    assert verifications.inserted["college_id_image_public_id"] == "verification/college"
+    assert (
+        verifications.inserted["college_id_image_public_id"] == "verification/college"
+    )
     assert verifications.inserted["selfie_image_public_id"] == "verification/selfie"
 
 
@@ -182,12 +210,15 @@ def test_old_and_new_admin_image_values_serialize_unchanged():
         image_data_uri(),
         "https://res.cloudinary.com/demo/image/upload/id.png",
     ):
-        result = server.serialize_admin_verification({
-            "_id": ObjectId(),
-            "user_id": ObjectId(),
-            "college_id_image": image_value,
-            "selfie_image": image_value,
-        }, include_images=True)
+        result = server.serialize_admin_verification(
+            {
+                "_id": ObjectId(),
+                "user_id": ObjectId(),
+                "college_id_image": image_value,
+                "selfie_image": image_value,
+            },
+            include_images=True,
+        )
         assert result["college_id_image"] == image_value
         assert result["selfie_image"] == image_value
         assert result["selfie_with_id"] == image_value

@@ -4,6 +4,7 @@ import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 from bson import ObjectId
 
@@ -14,6 +15,23 @@ os.environ["DB_NAME"] = "savycampusdeals_unit"
 os.environ["JWT_SECRET"] = "unit-test-secret"
 
 import server  # noqa: E402
+
+
+class Cursor:
+    def __init__(self, rows):
+        self.rows = rows
+
+    async def to_list(self, _length):
+        return self.rows
+
+
+class UserCollection:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def find(self, query, _projection):
+        selected = set(query["_id"]["$in"])
+        return Cursor([row for row in self.rows if row["_id"] in selected])
 
 
 def report_records():
@@ -134,3 +152,50 @@ def test_csv_cells_neutralize_spreadsheet_formulas():
     assert server._csv_cell("=HYPERLINK(\"bad\")") == "'=HYPERLINK(\"bad\")"
     assert server._csv_cell("  +SUM(1,1)") == "'  +SUM(1,1)"
     assert server._csv_cell("Normal offer") == "Normal offer"
+
+
+def test_student_claims_identify_brand_visitors_and_repeat_engagement(monkeypatch):
+    now, outlets, offers, _ = report_records()
+    student_id = ObjectId()
+    brand_offer = next(offer for offer in offers if offer.get("brand") == "Adobe")
+    claim = {
+        "_id": ObjectId(),
+        "offer_id": brand_offer["_id"],
+        "user_id": student_id,
+        "record_type": "brand_offer_claim",
+        "status": "claimed",
+        "created_at": now,
+        "claimed_at": now,
+        "last_visited_at": now + timedelta(hours=2),
+        "visit_count": 3,
+    }
+
+    async def fake_loader(_start, _end):
+        return outlets, offers, [claim]
+
+    monkeypatch.setattr(server, "_load_brand_outlet_report_data", fake_loader)
+    monkeypatch.setattr(server, "db", SimpleNamespace(users=UserCollection([{
+        "_id": student_id,
+        "name": "Aarav Student",
+        "email": "aarav@example.com",
+        "college": "Amity University",
+        "student_number": "SCD-1001",
+    }])))
+
+    result = asyncio.run(server.admin_brand_outlet_claims(
+        entity_type="brand",
+        entity_id="adobe",
+        status="claimed",
+        date_from=None,
+        date_to=None,
+        page=1,
+        page_size=10,
+        admin={"role": "admin"},
+    ))
+
+    assert result["total"] == 1
+    assert result["items"][0]["student_name"] == "Aarav Student"
+    assert result["items"][0]["offer_title"] == "Student plan"
+    assert result["items"][0]["interaction_type"] == "brand_claim"
+    assert result["items"][0]["visit_count"] == 3
+    assert result["items"][0]["last_visited_at"] == (now + timedelta(hours=2)).isoformat()

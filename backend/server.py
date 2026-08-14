@@ -122,6 +122,339 @@ def create_access_token(uid: str, email: str, role: str) -> str:
     )
 
 
+SAVVY_POINT_TIERS = [
+    {
+        "key": "campus_starter",
+        "name": "Campus Starter",
+        "minimum": 0,
+        "benefit": "Start stacking rewards every time you use a partner deal.",
+        "reward": "Savvy membership and access to student-only partner deals.",
+    },
+    {
+        "key": "deal_hunter",
+        "name": "Deal Hunter",
+        "minimum": 700,
+        "benefit": "Your first real level reward is ready to enjoy.",
+        "reward": "One free cold coffee, iced tea, lemonade, or similar drink.",
+    },
+    {
+        "key": "savvy_insider",
+        "name": "Savvy Insider",
+        "minimum": 2000,
+        "benefit": "A bigger campus treat for a true Savvy regular.",
+        "reward": "One free drink, one free pizza, and a voucher worth up to ₹150.",
+    },
+    {
+        "key": "campus_icon",
+        "name": "Campus Icon",
+        "minimum": 5000,
+        "benefit": "You've unlocked the biggest Savvy milestone reward.",
+        "reward": "One laptop bag, one water bottle, and a voucher worth up to ₹300.",
+    },
+]
+SAVVY_REDEMPTION_POINTS = 50
+SAVVY_REWARD_VALID_DAYS = 30
+
+
+def savvy_points_balance(user: dict) -> int:
+    return int(user.get("savvy_points_balance", user.get("reward_points", 0)) or 0)
+
+
+def savvy_points_lifetime(user: dict) -> int:
+    return int(user.get("savvy_points_lifetime", savvy_points_balance(user)) or 0)
+
+
+def savvy_tier(lifetime_points: int) -> dict:
+    current_index = 0
+    for index, tier in enumerate(SAVVY_POINT_TIERS):
+        if lifetime_points >= tier["minimum"]:
+            current_index = index
+        else:
+            break
+    current = SAVVY_POINT_TIERS[current_index]
+    next_tier = (
+        SAVVY_POINT_TIERS[current_index + 1]
+        if current_index + 1 < len(SAVVY_POINT_TIERS)
+        else None
+    )
+    if next_tier:
+        span = next_tier["minimum"] - current["minimum"]
+        progress = round(
+            min(100, max(0, (lifetime_points - current["minimum"]) / span * 100)),
+            1,
+        )
+        points_to_next = max(0, next_tier["minimum"] - lifetime_points)
+    else:
+        progress = 100
+        points_to_next = 0
+    return {
+        **current,
+        "index": current_index,
+        "progress_percent": progress,
+        "points_to_next": points_to_next,
+        "next_tier": next_tier,
+    }
+
+
+async def ensure_savvy_point_fields(user_id: ObjectId) -> dict:
+    """Lazily preserve a legacy reward_points balance before the first new award."""
+    user = await db.users.find_one({"_id": user_id})
+    if not user:
+        raise RuntimeError("Points recipient no longer exists")
+    if "savvy_points_balance" not in user or "savvy_points_lifetime" not in user:
+        legacy_balance = int(user.get("reward_points", 0) or 0)
+        await db.users.update_one(
+            {"_id": user_id},
+            {
+                "$set": {
+                    "savvy_points_balance": legacy_balance,
+                    "savvy_points_lifetime": legacy_balance,
+                    "reward_points": legacy_balance,
+                }
+            },
+        )
+        user = {
+            **user,
+            "savvy_points_balance": legacy_balance,
+            "savvy_points_lifetime": legacy_balance,
+            "reward_points": legacy_balance,
+        }
+    return user
+
+
+def serialize_level_reward(reward: dict) -> dict:
+    status = reward.get("status", "active")
+    if (
+        status == "active"
+        and reward.get("expires_at")
+        and _aware(reward["expires_at"]) <= datetime.now(timezone.utc)
+    ):
+        status = "expired"
+    return {
+        "id": str(reward["_id"]),
+        "tier_key": reward.get("tier_key", ""),
+        "tier_name": reward.get("tier_name", ""),
+        "reward_title": reward.get("reward_title", ""),
+        "code": reward.get("code", ""),
+        "qr_data_uri": reward.get("qr_data_uri", ""),
+        "status": status,
+        "unlocked_at": reward.get("unlocked_at").isoformat()
+        if reward.get("unlocked_at")
+        else None,
+        "expires_at": reward.get("expires_at").isoformat()
+        if reward.get("expires_at")
+        else None,
+        "redeemed_at": reward.get("redeemed_at").isoformat()
+        if reward.get("redeemed_at")
+        else None,
+        "redeemed_outlet_id": str(reward["redeemed_outlet_id"])
+        if reward.get("redeemed_outlet_id")
+        else None,
+    }
+
+
+def level_reward_email_html(user: dict, tier: dict, reward: dict) -> str:
+    first_name = html.escape(user.get("name", "Savvy member").strip().split(" ")[0])
+    reward_title = html.escape(tier["reward"])
+    expiry = _aware(reward["expires_at"]).astimezone(INDIA_TIMEZONE).strftime(
+        "%d %b %Y"
+    )
+    dashboard_url = f"{FRONTEND_URL.rstrip('/')}/dashboard"
+    return f"""<!doctype html>
+<html><body style="margin:0;padding:0;background:#07060b;color:#fff;font-family:Arial,Helvetica,sans-serif;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#07060b;"><tr><td align="center" style="padding:32px 16px;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;border-radius:28px;overflow:hidden;background:#13101d;border:1px solid #45366f;">
+    <tr><td style="padding:34px 30px;background:linear-gradient(135deg,#6d28d9,#c026d3 55%,#f59e0b);">
+      <div style="font-size:12px;font-weight:800;letter-spacing:2.4px;text-transform:uppercase;color:#fff7d6;">Savvy level unlocked ✦</div>
+      <h1 style="margin:12px 0 0;font-size:38px;line-height:1.05;letter-spacing:-1.5px;">Big move, {first_name}!</h1>
+      <p style="margin:12px 0 0;font-size:18px;line-height:1.5;color:#f5eefe;">You just reached <strong>{html.escape(tier['name'])}</strong>.</p>
+    </td></tr>
+    <tr><td style="padding:28px 30px 8px;">
+      <div style="border-radius:22px;background:#201933;border:1px solid #58437f;padding:23px;">
+        <div style="font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:#d8b4fe;">Your reward</div>
+        <div style="padding-top:10px;font-size:22px;line-height:1.35;font-weight:800;color:#fff;">{reward_title}</div>
+      </div>
+    </td></tr>
+    <tr><td align="center" style="padding:22px 30px 8px;">
+      <div style="display:inline-block;padding:13px;border-radius:20px;background:#fff;line-height:0;"><img src="cid:level-reward-qr" width="190" height="190" alt="Savvy reward QR code" style="display:block;border:0;" /></div>
+      <div style="padding-top:14px;font-size:16px;font-weight:800;letter-spacing:1px;color:#fff;">{html.escape(reward['code'])}</div>
+      <div style="padding-top:7px;font-size:13px;color:#b8b1c7;">Valid until {expiry} · One-time use</div>
+    </td></tr>
+    <tr><td style="padding:24px 30px 34px;text-align:center;">
+      <p style="margin:0;color:#c9c3d4;font-size:14px;line-height:1.6;">Show this QR to the team at a participating Savvy partner cafe. The reward is marked used after they approve it.</p>
+      <a href="{dashboard_url}" style="display:inline-block;margin-top:22px;border-radius:999px;background:#fff;color:#111;padding:13px 23px;font-size:14px;font-weight:800;text-decoration:none;">Open my reward</a>
+      <div style="padding-top:24px;font-size:12px;color:#746d80;">SavvyCampusDeals · made for student wins</div>
+    </td></tr>
+  </table>
+</td></tr></table></body></html>"""
+
+
+async def ensure_level_rewards(user_id: ObjectId) -> list[dict]:
+    """Issue every earned non-starter tier reward exactly once."""
+    user = await db.users.find_one({"_id": user_id})
+    if not user:
+        return []
+    if effective_verification_status(user) != "approved":
+        return await db.savvy_level_rewards.find({"user_id": user_id}).sort(
+            "threshold", 1
+        ).to_list(len(SAVVY_POINT_TIERS) - 1)
+    lifetime = savvy_points_lifetime(user)
+    for tier in SAVVY_POINT_TIERS[1:]:
+        if lifetime < tier["minimum"]:
+            continue
+        now = datetime.now(timezone.utc)
+        code = f"SVR-{secrets.token_hex(5).upper()}"
+        payload = f"{FRONTEND_URL.rstrip('/')}/scan?r={code}"
+        qr = generate_qr_data_uri(payload)
+        reward = {
+            "_id": ObjectId(),
+            "user_id": user_id,
+            "tier_key": tier["key"],
+            "tier_name": tier["name"],
+            "threshold": tier["minimum"],
+            "reward_title": tier["reward"],
+            "code": code,
+            "qr_data_uri": qr,
+            "status": "active",
+            "unlocked_at": now,
+            "expires_at": now + timedelta(days=SAVVY_REWARD_VALID_DAYS),
+            "redeemed_at": None,
+        }
+        try:
+            await db.savvy_level_rewards.insert_one(reward)
+        except DuplicateKeyError:
+            continue
+        send_email(
+            user["email"],
+            f"{tier['name']} unlocked — your Savvy reward is here ✨",
+            level_reward_email_html(user, tier, reward),
+            attachments=[
+                {
+                    "content": qr.split(",", 1)[1],
+                    "filename": f"{tier['key']}-reward-qr.png",
+                    "content_id": "level-reward-qr",
+                }
+            ],
+        )
+    return await db.savvy_level_rewards.find({"user_id": user_id}).sort(
+        "threshold", 1
+    ).to_list(len(SAVVY_POINT_TIERS) - 1)
+
+
+async def award_savvy_points(
+    user_id: ObjectId,
+    amount: int,
+    event_type: str,
+    source_id: str,
+    title: str,
+    description: str,
+) -> bool:
+    """Award an earning event once and keep balance/lifetime totals in sync."""
+    if amount <= 0:
+        raise ValueError("Savvy Points awards must be positive")
+    await ensure_savvy_point_fields(user_id)
+    event_key = f"{event_type}:{source_id}:{user_id}"
+    now = datetime.now(timezone.utc)
+    try:
+        await db.savvy_points_transactions.insert_one(
+            {
+                "user_id": user_id,
+                "amount": amount,
+                "event_type": event_type,
+                "source_id": source_id,
+                "event_key": event_key,
+                "title": title,
+                "description": description,
+                "status": "pending",
+                "created_at": now,
+            }
+        )
+    except DuplicateKeyError:
+        pass
+    result = await db.users.update_one(
+        {"_id": user_id, "processed_savvy_point_events": {"$ne": event_key}},
+        {
+            "$inc": {
+                "savvy_points_balance": amount,
+                "savvy_points_lifetime": amount,
+                # Kept in sync during the compatibility window for older clients.
+                "reward_points": amount,
+            },
+            "$addToSet": {"processed_savvy_point_events": event_key},
+        },
+    )
+    await db.savvy_points_transactions.update_one(
+        {"event_key": event_key},
+        {"$set": {"status": "earned", "processed_at": datetime.now(timezone.utc)}},
+    )
+    if result.matched_count:
+        try:
+            await ensure_level_rewards(user_id)
+        except Exception:
+            logger.exception("Could not issue Savvy level reward for user %s", user_id)
+    return bool(result.matched_count)
+
+
+async def complete_pending_referral(referred_user_id: ObjectId) -> bool:
+    """Release both 100-point bonuses once the referred student is verified."""
+    referral = await db.referrals.find_one({"referred_id": referred_user_id})
+    if not referral:
+        return False
+    if referral.get("status") == "awarded" or referral.get("points_awarded", 0) > 0:
+        if referral.get("status") != "awarded":
+            await db.referrals.update_one(
+                {"_id": referral["_id"]}, {"$set": {"status": "awarded"}}
+            )
+        return False
+
+    referral_id = str(referral["_id"])
+    referred = await db.users.find_one({"_id": referred_user_id})
+    if not referred or effective_verification_status(referred) != "approved":
+        return False
+    referrer = await db.users.find_one({"_id": referral["referrer_id"]})
+    if not referrer:
+        return False
+
+    first_name = referred.get("name", "A friend").strip().split(" ")[0]
+    await award_savvy_points(
+        referrer["_id"],
+        100,
+        "referral",
+        f"{referral_id}:referrer",
+        "Referral verified",
+        f"{first_name} verified their student account.",
+    )
+    await award_savvy_points(
+        referred_user_id,
+        100,
+        "referral",
+        f"{referral_id}:referred",
+        "Referral welcome bonus",
+        "You joined with a friend's referral code and got verified.",
+    )
+    now = datetime.now(timezone.utc)
+    await db.referrals.update_one(
+        {"_id": referral["_id"]},
+        {
+            "$set": {
+                "status": "awarded",
+                "points_awarded": 100,
+                "referred_points_awarded": 100,
+                "qualified_at": now,
+            }
+        },
+    )
+    send_email(
+        referrer["email"],
+        "You just earned 100 Savvy Points",
+        f"""<div style="font-family:Manrope,Arial,sans-serif;background:#050505;color:#fff;padding:32px;border-radius:16px;max-width:520px;margin:auto">
+        <h1 style="font-family:Outfit,sans-serif;font-weight:800">+100 Savvy Points</h1>
+        <p>{html.escape(first_name)} verified their student account. Your referral reward is now in your Savvy balance.</p>
+        </div>""",
+    )
+    return True
+
+
 def serialize_user(u: dict) -> dict:
     verification_status = effective_verification_status(u)
     # Legacy accounts used "unverified" before verification states were added.
@@ -146,7 +479,9 @@ def serialize_user(u: dict) -> dict:
         "student_number": u.get("student_number", ""),
         "verification_expiry": u.get("verification_expiry"),
         "reverification_email_verified": has_current_reverification_email(u),
-        "reward_points": u.get("reward_points", 0),
+        "savvy_points_balance": savvy_points_balance(u),
+        "savvy_points_lifetime": savvy_points_lifetime(u),
+        "reward_points": savvy_points_balance(u),
         "referral_code": u.get("referral_code", ""),
         "outlet_id": str(u["outlet_id"]) if u.get("outlet_id") else None,
         "active": u.get("active", True),
@@ -527,6 +862,19 @@ class AdminPartnerStatusIn(BaseModel):
     active: bool
 
 
+class AdminAnnouncementIn(BaseModel):
+    title: str = Field(min_length=2, max_length=100)
+    message: str = Field(min_length=2, max_length=600)
+    category: str = Field(default="new", max_length=20)
+    audience: str = Field(default="students", max_length=20)
+    priority: int = Field(default=1, ge=0, le=2)
+    cta_label: Optional[str] = Field(default="", max_length=40)
+    cta_url: Optional[str] = Field(default="", max_length=300)
+    image_url: Optional[str] = Field(default="", max_length=1000)
+    starts_at: Optional[datetime] = None
+    published: bool = False
+
+
 class OtpVerifyIn(BaseModel):
     email: EmailStr
     otp: str = Field(min_length=6, max_length=6)
@@ -614,7 +962,6 @@ async def register(body: RegisterIn, response: Response):
     now = datetime.now(timezone.utc)
     verify_token = secrets.token_urlsafe(24)
     welcome_points = 100
-    referral_bonus = 100 if referrer else 0
     user_doc = {
         "email": email,
         "password_hash": hash_password(body.password),
@@ -630,7 +977,9 @@ async def register(body: RegisterIn, response: Response):
         "verification_status": "not_submitted",
         "student_number": "",
         "verification_expiry": None,
-        "reward_points": welcome_points + referral_bonus,
+        "savvy_points_balance": welcome_points,
+        "savvy_points_lifetime": welcome_points,
+        "reward_points": welcome_points,
         "referral_code": gen_ref_code(body.name),
         "referred_by": ref_code_raw if referrer else "",
         "referrer_id": referrer["_id"] if referrer else None,
@@ -639,29 +988,35 @@ async def register(body: RegisterIn, response: Response):
     result = await db.users.insert_one(user_doc)
     user_doc["_id"] = result.inserted_id
 
-    # Reward the referrer + log the referral event
+    await db.savvy_points_transactions.insert_one(
+        {
+            "user_id": result.inserted_id,
+            "amount": welcome_points,
+            "event_type": "welcome",
+            "source_id": str(result.inserted_id),
+            "event_key": f"welcome:{result.inserted_id}:{result.inserted_id}",
+            "title": "Welcome to Savvy",
+            "description": "Your first Savvy Points are ready. Get verified to earn more.",
+            "status": "earned",
+            "created_at": now,
+        }
+    )
+
+    # Record the relationship now; both bonuses unlock after student verification.
     if referrer:
-        await db.users.update_one(
-            {"_id": referrer["_id"]}, {"$inc": {"reward_points": 100}}
-        )
         await db.referrals.insert_one(
             {
                 "referrer_id": referrer["_id"],
                 "referrer_email": referrer["email"],
                 "referred_id": result.inserted_id,
                 "referred_email": email,
-                "points_awarded": 100,
+                "status": "pending",
+                "points_awarded": 0,
+                "referred_points_awarded": 0,
+                "reward_points_each": 100,
+                "qualified_at": None,
                 "created_at": now,
             }
-        )
-        # Bonus notification email (best-effort)
-        send_email(
-            referrer["email"],
-            "You just earned 100 SavyPoints",
-            f"""<div style="font-family:Manrope,Arial,sans-serif;background:#050505;color:#fff;padding:32px;border-radius:16px;max-width:520px;margin:auto">
-            <h1 style="font-family:Outfit,sans-serif;font-weight:800">+100 SavyPoints</h1>
-            <p>{body.name.split(' ')[0]} just joined SavvyCampusDeals using your code <b>{ref_code_raw}</b>. 100 points added to your account.</p>
-            </div>""",
         )
 
     # Generate and send OTP (6-digit)
@@ -1263,13 +1618,12 @@ async def submit_verification(
         "year": body.year,
     }
     update: dict = {"$set": user_updates}
+    first_verification_reward = trusted_email and not user.get("verification_expiry")
     if trusted_email:
         user_updates.update({
             "student_number": user.get("student_number") or gen_student_number(),
             "verification_expiry": now + timedelta(days=365),
         })
-        if not user.get("verification_expiry"):
-            update["$inc"] = {"reward_points": 200}
     try:
         user_result = await db.users.update_one({"_id": user["_id"]}, update)
         if not user_result.matched_count:
@@ -1292,6 +1646,17 @@ async def submit_verification(
             503,
             "Verification could not be saved. Please try again.",
         ) from None
+
+    if first_verification_reward:
+        await award_savvy_points(
+            user["_id"],
+            200,
+            "verification",
+            str(user["_id"]),
+            "Student status verified",
+            "Your verified student bonus is unlocked.",
+        )
+        await complete_pending_referral(user["_id"])
 
     if reusable_verification and not trusted_email:
         await _cleanup_verification_uploads(
@@ -1546,14 +1911,25 @@ async def review_verification(
     )
     user_updates = {"verification_status": body.status}
     update: dict = {"$set": user_updates}
+    first_verification_reward = (
+        body.status == "approved" and not student.get("verification_expiry")
+    )
     if body.status == "approved":
         user_updates.update({
             "student_number": student.get("student_number") or gen_student_number(),
             "verification_expiry": now + timedelta(days=365),
         })
-        if not student.get("verification_expiry"):
-            update["$inc"] = {"reward_points": 200}
     await db.users.update_one({"_id": student["_id"]}, update)
+    if first_verification_reward:
+        await award_savvy_points(
+            student["_id"],
+            200,
+            "verification",
+            str(student["_id"]),
+            "Student status verified",
+            "Your verified student bonus is unlocked.",
+        )
+        await complete_pending_referral(student["_id"])
 
     if verification.get("status") != body.status:
         if body.status == "approved":
@@ -1599,6 +1975,9 @@ def serialize_admin_user(user: dict) -> dict:
         "verification_submitted_at": _admin_datetime(user.get("verification_submitted_at")),
         "verification_reviewed_at": _admin_datetime(user.get("verification_reviewed_at")),
         "verification_rejection_reason": user.get("verification_rejection_reason", ""),
+        "savvy_points_balance": savvy_points_balance(user),
+        "savvy_points_lifetime": savvy_points_lifetime(user),
+        "savvy_tier": savvy_tier(savvy_points_lifetime(user))["name"],
         "created_at": _admin_datetime(user.get("created_at")),
     }
 
@@ -1626,6 +2005,102 @@ def serialize_admin_verification(doc: dict, include_images: bool = False) -> dic
         result["selfie_image"] = doc.get("selfie_image", "")
         result["selfie_with_id"] = doc.get("selfie_image", "")
     return result
+
+
+ANNOUNCEMENT_CATEGORIES = {"new", "important", "limited"}
+ANNOUNCEMENT_AUDIENCES = {"everyone", "students", "partners"}
+ANNOUNCEMENT_LIFETIME_DAYS = 5
+
+
+def _validated_announcement_payload(body: AdminAnnouncementIn) -> dict:
+    category = body.category.strip().lower()
+    audience = body.audience.strip().lower()
+    if category not in ANNOUNCEMENT_CATEGORIES:
+        raise HTTPException(400, "Invalid announcement category")
+    if audience not in ANNOUNCEMENT_AUDIENCES:
+        raise HTTPException(400, "Invalid announcement audience")
+
+    cta_label = (body.cta_label or "").strip()
+    cta_url = (body.cta_url or "").strip()
+    if bool(cta_label) != bool(cta_url):
+        raise HTTPException(400, "CTA label and destination must be provided together")
+    if cta_url and not (cta_url.startswith("/") or cta_url.startswith("https://")):
+        raise HTTPException(400, "CTA destination must be a site path or HTTPS URL")
+
+    image_url = (body.image_url or "").strip()
+    if image_url and not (
+        image_url.startswith("https://") or image_url.startswith("data:image/")
+    ):
+        raise HTTPException(400, "Announcement image must use HTTPS")
+
+    starts_at = _aware(body.starts_at) or datetime.now(timezone.utc)
+    return {
+        "title": body.title.strip(),
+        "message": body.message.strip(),
+        "category": category,
+        "audience": audience,
+        "priority": body.priority,
+        "cta_label": cta_label,
+        "cta_url": cta_url,
+        "image_url": image_url,
+        "starts_at": starts_at,
+        "expires_at": starts_at + timedelta(days=ANNOUNCEMENT_LIFETIME_DAYS),
+        "published": body.published,
+    }
+
+
+def serialize_announcement(
+    announcement: dict,
+    receipt: Optional[dict] = None,
+    stats: Optional[dict] = None,
+) -> dict:
+    now = datetime.now(timezone.utc)
+    starts_at = _aware(announcement.get("starts_at"))
+    expires_at = _aware(announcement.get("expires_at"))
+    if not announcement.get("published", False):
+        status = "draft"
+    elif starts_at and starts_at > now:
+        status = "scheduled"
+    elif expires_at and expires_at <= now:
+        status = "expired"
+    else:
+        status = "active"
+    result = {
+        "id": str(announcement["_id"]),
+        "title": announcement.get("title", ""),
+        "message": announcement.get("message", ""),
+        "category": announcement.get("category", "new"),
+        "audience": announcement.get("audience", "students"),
+        "priority": int(announcement.get("priority", 1) or 0),
+        "cta_label": announcement.get("cta_label", ""),
+        "cta_url": announcement.get("cta_url", ""),
+        "image_url": announcement.get("image_url", ""),
+        "published": announcement.get("published", False),
+        "status": status,
+        "starts_at": _admin_datetime(announcement.get("starts_at")),
+        "expires_at": _admin_datetime(announcement.get("expires_at")),
+        "created_at": _admin_datetime(announcement.get("created_at")),
+        "updated_at": _admin_datetime(announcement.get("updated_at")),
+    }
+    if receipt is not None:
+        result.update(
+            {
+                "seen": bool(receipt.get("seen_at")),
+                "seen_at": _admin_datetime(receipt.get("seen_at")),
+                "clicked": bool(receipt.get("clicked_at")),
+            }
+        )
+    if stats is not None:
+        result["stats"] = stats
+    return result
+
+
+def _announcement_audiences_for(user: dict) -> list[str]:
+    if user.get("role") == "student":
+        return ["everyone", "students"]
+    if user.get("role") == "outlet_partner":
+        return ["everyone", "partners"]
+    return []
 
 
 async def _review_pending_verification(
@@ -1674,6 +2149,9 @@ async def _review_pending_verification(
         "verification_rejection_reason": note,
     }
     update: dict = {"$set": user_updates}
+    first_verification_reward = status == "approved" and not student.get(
+        "verification_expiry"
+    )
     if status == "approved":
         user_updates.update(
             {
@@ -1681,9 +2159,17 @@ async def _review_pending_verification(
                 "verification_expiry": now + timedelta(days=365),
             }
         )
-        if not student.get("verification_expiry"):
-            update["$inc"] = {"reward_points": 200}
     await db.users.update_one({"_id": student["_id"]}, update)
+    if first_verification_reward:
+        await award_savvy_points(
+            student["_id"],
+            200,
+            "verification",
+            str(student["_id"]),
+            "Student status verified",
+            "Your verified student bonus is unlocked.",
+        )
+        await complete_pending_referral(student["_id"])
 
     if status == "approved":
         email_result = send_email(
@@ -1770,6 +2256,184 @@ async def admin_dashboard(admin=Depends(get_admin_user)):
         "outlet_partners": partners,
         "outlet_redemptions": redeemed,
     }
+
+
+@api.get("/announcements")
+async def active_announcements(user=Depends(get_current_user)):
+    """Return the current five-day announcement collection for this account."""
+    audiences = _announcement_audiences_for(user)
+    if not audiences:
+        return {"items": [], "unread_count": 0, "modal": None}
+    now = datetime.now(timezone.utc)
+    announcements = await db.announcements.find(
+        {
+            "published": True,
+            "audience": {"$in": audiences},
+            "starts_at": {"$lte": now},
+            "expires_at": {"$gt": now},
+        }
+    ).sort([("priority", -1), ("starts_at", -1)]).to_list(50)
+    announcement_ids = [item["_id"] for item in announcements]
+    receipts = {
+        item["announcement_id"]: item
+        async for item in db.announcement_receipts.find(
+            {
+                "user_id": user["_id"],
+                "announcement_id": {"$in": announcement_ids},
+            }
+        )
+    }
+    delivered_at = datetime.now(timezone.utc)
+    for item in announcements:
+        if item["_id"] not in receipts:
+            await db.announcement_receipts.update_one(
+                {"user_id": user["_id"], "announcement_id": item["_id"]},
+                {"$setOnInsert": {"delivered_at": delivered_at}},
+                upsert=True,
+            )
+    serialized = [
+        serialize_announcement(item, receipts.get(item["_id"], {}))
+        for item in announcements
+    ]
+    unseen = [item for item in serialized if not item["seen"]]
+    return {
+        "items": serialized,
+        "unread_count": len(unseen),
+        "modal": unseen[0] if unseen else None,
+    }
+
+
+async def _audience_checked_announcement(announcement_id: str, user: dict) -> dict:
+    try:
+        announcement_oid = ObjectId(announcement_id)
+    except Exception:
+        raise HTTPException(404, "Announcement not found")
+    now = datetime.now(timezone.utc)
+    announcement = await db.announcements.find_one(
+        {
+            "_id": announcement_oid,
+            "published": True,
+            "audience": {"$in": _announcement_audiences_for(user)},
+            "starts_at": {"$lte": now},
+            "expires_at": {"$gt": now},
+        }
+    )
+    if not announcement:
+        raise HTTPException(404, "Announcement not found")
+    return announcement
+
+
+@api.post("/announcements/{announcement_id}/seen")
+async def mark_announcement_seen(
+    announcement_id: str, user=Depends(get_current_user)
+):
+    announcement = await _audience_checked_announcement(announcement_id, user)
+    now = datetime.now(timezone.utc)
+    await db.announcement_receipts.update_one(
+        {"user_id": user["_id"], "announcement_id": announcement["_id"]},
+        {
+            "$setOnInsert": {"delivered_at": now},
+            "$set": {"seen_at": now},
+        },
+        upsert=True,
+    )
+    return {"ok": True}
+
+
+@api.post("/announcements/{announcement_id}/click")
+async def mark_announcement_clicked(
+    announcement_id: str, user=Depends(get_current_user)
+):
+    announcement = await _audience_checked_announcement(announcement_id, user)
+    now = datetime.now(timezone.utc)
+    await db.announcement_receipts.update_one(
+        {"user_id": user["_id"], "announcement_id": announcement["_id"]},
+        {
+            "$setOnInsert": {"delivered_at": now},
+            "$set": {"seen_at": now, "clicked_at": now},
+        },
+        upsert=True,
+    )
+    return {"ok": True}
+
+
+@api.get("/admin/announcements")
+async def admin_announcements(admin=Depends(get_admin_user)):
+    announcements = await db.announcements.find({}).sort("created_at", -1).to_list(200)
+    items = []
+    for announcement in announcements:
+        receipt_query = {"announcement_id": announcement["_id"]}
+        delivered, seen, clicked = await asyncio.gather(
+            db.announcement_receipts.count_documents(receipt_query),
+            db.announcement_receipts.count_documents(
+                {**receipt_query, "seen_at": {"$ne": None}}
+            ),
+            db.announcement_receipts.count_documents(
+                {**receipt_query, "clicked_at": {"$ne": None}}
+            ),
+        )
+        items.append(
+            serialize_announcement(
+                announcement,
+                stats={"delivered": delivered, "seen": seen, "clicked": clicked},
+            )
+        )
+    return {"items": items, "lifetime_days": ANNOUNCEMENT_LIFETIME_DAYS}
+
+
+@api.post("/admin/announcements")
+async def admin_create_announcement(
+    body: AdminAnnouncementIn, admin=Depends(get_admin_user)
+):
+    now = datetime.now(timezone.utc)
+    document = {
+        **_validated_announcement_payload(body),
+        "created_at": now,
+        "updated_at": now,
+        "created_by": admin["_id"],
+    }
+    result = await db.announcements.insert_one(document)
+    document["_id"] = result.inserted_id
+    return serialize_announcement(document, stats={"delivered": 0, "seen": 0, "clicked": 0})
+
+
+@api.put("/admin/announcements/{announcement_id}")
+async def admin_update_announcement(
+    announcement_id: str,
+    body: AdminAnnouncementIn,
+    admin=Depends(get_admin_user),
+):
+    try:
+        announcement_oid = ObjectId(announcement_id)
+    except Exception:
+        raise HTTPException(404, "Announcement not found")
+    updates = {
+        **_validated_announcement_payload(body),
+        "updated_at": datetime.now(timezone.utc),
+        "updated_by": admin["_id"],
+    }
+    result = await db.announcements.update_one(
+        {"_id": announcement_oid}, {"$set": updates}
+    )
+    if not result.matched_count:
+        raise HTTPException(404, "Announcement not found")
+    fresh = await db.announcements.find_one({"_id": announcement_oid})
+    return serialize_announcement(fresh)
+
+
+@api.delete("/admin/announcements/{announcement_id}")
+async def admin_delete_announcement(
+    announcement_id: str, admin=Depends(get_admin_user)
+):
+    try:
+        announcement_oid = ObjectId(announcement_id)
+    except Exception:
+        raise HTTPException(404, "Announcement not found")
+    result = await db.announcements.delete_one({"_id": announcement_oid})
+    if not result.deleted_count:
+        raise HTTPException(404, "Announcement not found")
+    await db.announcement_receipts.delete_many({"announcement_id": announcement_oid})
+    return {"ok": True}
 
 
 @api.get("/admin/referrals")
@@ -3035,6 +3699,8 @@ async def _load_brand_outlet_report_data(
                 "offer_id": 1,
                 "user_id": 1,
                 "claimed_at": 1,
+                "last_visited_at": 1,
+                "visit_count": 1,
             },
         ).to_list(None),
     )
@@ -3111,6 +3777,106 @@ async def admin_brands_outlets(
         "items": rows,
         "cities": available_cities,
         "date_basis": "Coupons are grouped alongside listed brand claims by their claimed date; coupon statuses are current.",
+    }
+
+
+@api.get("/admin/brands-outlets/claims")
+async def admin_brand_outlet_claims(
+    entity_type: str = Query(..., alias="type"),
+    entity_id: str = Query(..., min_length=1, max_length=200),
+    status: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
+    admin=Depends(get_admin_user),
+):
+    """Show which students claimed offers for one brand or outlet."""
+    if entity_type not in {"outlet", "brand"}:
+        raise HTTPException(400, "Type must be outlet or brand")
+    if status and status not in {"claimed", "active", "redeemed", "expired"}:
+        raise HTTPException(400, "Invalid claim status")
+
+    start, end = _admin_report_date_range(date_from, date_to)
+    outlets, offers, activities = await _load_brand_outlet_report_data(start, end)
+    if entity_type == "outlet":
+        try:
+            outlet_oid = ObjectId(entity_id)
+        except Exception:
+            raise HTTPException(404, "Outlet not found")
+        if not any(outlet.get("_id") == outlet_oid for outlet in outlets):
+            raise HTTPException(404, "Outlet not found")
+        entity_offers = [offer for offer in offers if offer.get("outlet_id") == outlet_oid]
+    else:
+        entity_offers = [
+            offer
+            for offer in offers
+            if not offer.get("outlet_id")
+            and (offer.get("brand") or "Unnamed brand").strip().casefold()
+            == entity_id.casefold()
+        ]
+        if not entity_offers:
+            raise HTTPException(404, "Brand not found")
+
+    offer_by_id = {offer["_id"]: offer for offer in entity_offers}
+    matching = []
+    for activity in activities:
+        if activity.get("offer_id") not in offer_by_id:
+            continue
+        is_brand_claim = activity.get("record_type") == "brand_offer_claim"
+        effective_status = (
+            "claimed" if is_brand_claim else _report_coupon_status(activity)
+        )
+        if status and effective_status != status:
+            continue
+        matching.append((activity, effective_status, is_brand_claim))
+    matching.sort(
+        key=lambda row: _aware(row[0].get("created_at"))
+        if row[0].get("created_at")
+        else datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+
+    total = len(matching)
+    selected = matching[(page - 1) * page_size : page * page_size]
+    student_ids = {
+        activity.get("user_id")
+        for activity, _, _ in selected
+        if activity.get("user_id")
+    }
+    students = await db.users.find(
+        {"_id": {"$in": list(student_ids)}},
+        {"name": 1, "email": 1, "college": 1, "student_number": 1},
+    ).to_list(len(student_ids) or 1)
+    student_by_id = {student["_id"]: student for student in students}
+    items = []
+    for activity, effective_status, is_brand_claim in selected:
+        student = student_by_id.get(activity.get("user_id"), {})
+        offer = offer_by_id.get(activity.get("offer_id"), {})
+        items.append(
+            {
+                "id": str(activity.get("_id", "")),
+                "student_id": str(activity.get("user_id", "")),
+                "student_name": student.get("name", ""),
+                "student_email": student.get("email", ""),
+                "student_college": student.get("college", ""),
+                "student_number": student.get("student_number", ""),
+                "offer_id": str(activity.get("offer_id", "")),
+                "offer_title": offer.get("title", ""),
+                "discount": offer.get("discount", ""),
+                "status": effective_status,
+                "interaction_type": "brand_claim" if is_brand_claim else "coupon",
+                "claimed_at": _admin_datetime(activity.get("created_at")),
+                "redeemed_at": _admin_datetime(activity.get("redeemed_at")),
+                "last_visited_at": _admin_datetime(activity.get("last_visited_at")),
+                "visit_count": activity.get("visit_count", 1) if is_brand_claim else None,
+            }
+        )
+    return {
+        "items": items,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
     }
 
 
@@ -3719,7 +4485,6 @@ async def claim_offer(offer_id: str, user=Depends(get_verified_user)):
     res = await db.coupons.insert_one(doc)
     doc["_id"] = res.inserted_id
     await db.offers.update_one({"_id": oid}, {"$inc": {"claims_count": 1}})
-    await db.users.update_one({"_id": user["_id"]}, {"$inc": {"reward_points": 10}})
 
     send_email(
         user["email"],
@@ -3974,10 +4739,81 @@ async def dashboard_stats(user=Depends(get_current_user)):
         "redeemed": redeemed,
         "active": active,
         "saved": saved,
-        "reward_points": user.get("reward_points", 0),
+        "savvy_points_balance": savvy_points_balance(user),
+        "savvy_points_lifetime": savvy_points_lifetime(user),
+        "reward_points": savvy_points_balance(user),
         "referral_code": user.get("referral_code", ""),
         "verification_status": user.get("verification_status", "unverified"),
         "total_offers": total_offers,
+    }
+
+
+@api.get("/savvy-points/overview")
+async def savvy_points_overview(
+    limit: int = Query(8, ge=1, le=25), user=Depends(get_current_user)
+):
+    await ensure_savvy_point_fields(user["_id"])
+    if effective_verification_status(user) == "approved":
+        # Also acts as a safe repair path if a verification response was interrupted.
+        await complete_pending_referral(user["_id"])
+    fresh = await db.users.find_one({"_id": user["_id"]})
+    level_rewards = await ensure_level_rewards(user["_id"])
+    transactions = await db.savvy_points_transactions.find(
+        {"user_id": user["_id"]}
+    ).sort("created_at", -1).limit(limit).to_list(limit)
+    pending_referrals = await db.referrals.count_documents(
+        {"referrer_id": user["_id"], "status": "pending"}
+    )
+    balance = savvy_points_balance(fresh)
+    lifetime = savvy_points_lifetime(fresh)
+    return {
+        "balance": balance,
+        "lifetime": lifetime,
+        "tier": savvy_tier(lifetime),
+        "pending_referrals": pending_referrals,
+        "activity": [
+            {
+                "id": str(item["_id"]),
+                "amount": item.get("amount", 0),
+                "event_type": item.get("event_type", "bonus"),
+                "title": item.get("title", "Savvy Points update"),
+                "description": item.get("description", ""),
+                "status": item.get("status", "earned"),
+                "created_at": item.get("created_at").isoformat()
+                if item.get("created_at")
+                else None,
+            }
+            for item in transactions
+        ],
+        "ways_to_earn": [
+            {
+                "type": "redeem",
+                "title": "Use a partner deal",
+                "description": "Claim, visit the outlet and let staff approve your QR.",
+                "points": SAVVY_REDEMPTION_POINTS,
+                "cta": "Find an outlet",
+                "href": "/outlets",
+            },
+            {
+                "type": "verify",
+                "title": "Verify student status",
+                "description": "Complete your student verification for a one-time boost.",
+                "points": 200,
+                "cta": "Check status",
+                "href": "/verify",
+                "completed": effective_verification_status(fresh) == "approved",
+            },
+            {
+                "type": "refer",
+                "title": "Bring a friend",
+                "description": "You both earn after your friend becomes a verified student.",
+                "points": 100,
+                "cta": "Copy your code",
+                "referral_code": fresh.get("referral_code", ""),
+            },
+        ],
+        "tiers": SAVVY_POINT_TIERS,
+        "level_rewards": [serialize_level_reward(item) for item in level_rewards],
     }
 
 
@@ -4136,7 +4972,7 @@ class ScanIn(BaseModel):
 
 def _parse_qr_payload(raw: str) -> dict:
     """Parse QR string. Supports:
-       - URL formats: https://.../scan?c=CODE  or  ?s=STUDENT_NUM  or  ?p=RAW
+       - URL formats: https://.../scan?c=CODE, ?r=REWARD, ?s=STUDENT_NUM, ?p=RAW
        - SCD|student_number|user_id|email  (student card, legacy)
        - COUPON|code|user_id|offer_id      (coupon, legacy)
        - raw coupon code like SCD-XXXXXXXX
@@ -4154,6 +4990,8 @@ def _parse_qr_payload(raw: str) -> dict:
             qs = parse_qs(u.query)
             if "c" in qs:
                 raw = qs["c"][0].strip()
+            elif "r" in qs:
+                return {"kind": "level_reward", "code": qs["r"][0].strip()}
             elif "s" in qs:
                 raw = qs["s"][0].strip()
             elif "p" in qs:
@@ -4176,6 +5014,8 @@ def _parse_qr_payload(raw: str) -> dict:
             "user_id": parts[2],
             "offer_id": parts[3],
         }
+    if raw.upper().startswith("SVR-"):
+        return {"kind": "level_reward", "code": raw.upper()}
     if raw.upper().startswith("SCD-") and len(raw) >= 8:
         # Student numbers look like SCD-2026-XXXXXX ; coupon codes like SCD-XXXXXXXX
         segs = raw.split("-")
@@ -4189,6 +5029,41 @@ def _parse_qr_payload(raw: str) -> dict:
 async def scan_lookup(body: ScanIn, scanner=Depends(get_scanner_user)):
     """Authenticated restaurant scanner lookup for student and coupon QRs."""
     parsed = _parse_qr_payload(body.payload)
+
+    if parsed["kind"] == "level_reward":
+        reward = await db.savvy_level_rewards.find_one({"code": parsed.get("code")})
+        if not reward:
+            raise HTTPException(404, "Level reward not found")
+        now = datetime.now(timezone.utc)
+        expired = bool(
+            reward.get("expires_at") and _aware(reward["expires_at"]) <= now
+        )
+        if expired and reward.get("status") == "active":
+            await db.savvy_level_rewards.update_one(
+                {"_id": reward["_id"], "status": "active"},
+                {"$set": {"status": "expired"}},
+            )
+        student = await db.users.find_one({"_id": reward["user_id"]})
+        return {
+            "kind": "level_reward",
+            "code": reward["code"],
+            "status": "expired" if expired and reward.get("status") == "active" else reward.get("status", "active"),
+            "expired": expired,
+            "tier_name": reward.get("tier_name", ""),
+            "reward_title": reward.get("reward_title", ""),
+            "student_name": (student or {}).get("name", ""),
+            "student_number": (student or {}).get("student_number", ""),
+            "student_college": (student or {}).get("college", ""),
+            "student_verified": bool(
+                student and effective_verification_status(student) == "approved"
+            ),
+            "expires_at": reward.get("expires_at").isoformat()
+            if reward.get("expires_at")
+            else None,
+            "redeemed_at": reward.get("redeemed_at").isoformat()
+            if reward.get("redeemed_at")
+            else None,
+        }
 
     if parsed["kind"] == "student":
         user = None
@@ -4274,6 +5149,49 @@ async def scan_lookup(body: ScanIn, scanner=Depends(get_scanner_user)):
 async def scan_redeem(body: ScanIn, scanner=Depends(get_scanner_user)):
     """Restaurant marks a coupon as redeemed."""
     parsed = _parse_qr_payload(body.payload)
+    if parsed["kind"] == "level_reward":
+        reward = await db.savvy_level_rewards.find_one({"code": parsed.get("code")})
+        if not reward:
+            raise HTTPException(404, "Level reward not found")
+        if reward.get("status") == "redeemed":
+            raise HTTPException(409, "Level reward already redeemed")
+        now = datetime.now(timezone.utc)
+        if reward.get("expires_at") and _aware(reward["expires_at"]) <= now:
+            await db.savvy_level_rewards.update_one(
+                {"_id": reward["_id"], "status": "active"},
+                {"$set": {"status": "expired"}},
+            )
+            raise HTTPException(410, "Level reward has expired")
+        student = await db.users.find_one({"_id": reward["user_id"]})
+        if not student or effective_verification_status(student) != "approved":
+            raise HTTPException(403, "Student not verified")
+        redeemed = await db.savvy_level_rewards.update_one(
+            {"_id": reward["_id"], "status": "active"},
+            {
+                "$set": {
+                    "status": "redeemed",
+                    "redeemed_at": now,
+                    "redeemed_outlet_id": scanner.get("outlet_id"),
+                    "redeemed_by_user_id": scanner["_id"],
+                }
+            },
+        )
+        if not redeemed.matched_count:
+            raise HTTPException(409, "Level reward already redeemed")
+        return {
+            "ok": True,
+            "kind": "level_reward",
+            "code": reward["code"],
+            "tier_name": reward.get("tier_name", ""),
+            "reward_title": reward.get("reward_title", ""),
+            "student_name": student.get("name", ""),
+            "student_number": student.get("student_number", ""),
+            "redeemed_at": now.isoformat(),
+            "approved_by": scanner.get("name", ""),
+            "outlet_id": str(scanner.get("outlet_id"))
+            if scanner.get("outlet_id")
+            else None,
+        }
     if parsed["kind"] != "coupon":
         raise HTTPException(400, "Not a coupon QR")
     code = parsed.get("code")
@@ -4288,9 +5206,16 @@ async def scan_redeem(body: ScanIn, scanner=Depends(get_scanner_user)):
             410,
             "This legacy brand coupon has been archived and cannot be redeemed",
         )
-    if c["status"] == "redeemed":
+    repairing_points_award = bool(
+        c["status"] == "redeemed" and c.get("savvy_points_award_pending")
+    )
+    if c["status"] == "redeemed" and not repairing_points_award:
         raise HTTPException(409, "Coupon already redeemed")
-    if c.get("expires_at") and _aware(c["expires_at"]) < datetime.now(timezone.utc):
+    if (
+        c.get("status") == "active"
+        and c.get("expires_at")
+        and _aware(c["expires_at"]) < datetime.now(timezone.utc)
+    ):
         await db.coupons.update_one({"_id": c["_id"]}, {"$set": {"status": "expired"}})
         raise HTTPException(410, "Coupon has expired")
 
@@ -4300,6 +5225,37 @@ async def scan_redeem(body: ScanIn, scanner=Depends(get_scanner_user)):
 
     now = datetime.now(timezone.utc)
     offer = await db.offers.find_one({"_id": c["offer_id"]})
+    if repairing_points_award:
+        await award_savvy_points(
+            c["user_id"],
+            SAVVY_REDEMPTION_POINTS,
+            "redemption",
+            str(c["_id"]),
+            "Partner deal redeemed",
+            f"You used your {(offer or {}).get('brand', 'partner')} deal.",
+        )
+        await db.coupons.update_one(
+            {"_id": c["_id"]},
+            {
+                "$set": {"savvy_points_awarded": SAVVY_REDEMPTION_POINTS},
+                "$unset": {"savvy_points_award_pending": ""},
+            },
+        )
+        return {
+            "ok": True,
+            "code": c["code"],
+            "redeemed_at": c.get("redeemed_at").isoformat()
+            if c.get("redeemed_at")
+            else now.isoformat(),
+            "offer_title": (offer or {}).get("title", ""),
+            "discount": (offer or {}).get("discount", ""),
+            "brand": (offer or {}).get("brand", ""),
+            "student_name": user.get("name", ""),
+            "student_number": user.get("student_number", ""),
+            "approved_by": scanner.get("name", ""),
+            "outlet_id": str(c.get("outlet_id")) if c.get("outlet_id") else None,
+            "savvy_points_awarded": SAVVY_REDEMPTION_POINTS,
+        }
     if c.get("outlet_id") and offer:
         policy = get_redemption_policy(offer)
         if policy == "daily":
@@ -4385,11 +5341,27 @@ async def scan_redeem(body: ScanIn, scanner=Depends(get_scanner_user)):
                 "redeemed_outlet_id": c.get("outlet_id"),
                 "redeemed_by_user_id": scanner["_id"],
                 "approved_by_user_id": scanner["_id"],
+                "savvy_points_award_pending": True,
             }
         },
     )
     if not redeemed.matched_count:
         raise HTTPException(409, "Coupon already redeemed")
+    await award_savvy_points(
+        c["user_id"],
+        SAVVY_REDEMPTION_POINTS,
+        "redemption",
+        str(c["_id"]),
+        "Partner deal redeemed",
+        f"You used your {(offer or {}).get('brand', 'partner')} deal.",
+    )
+    await db.coupons.update_one(
+        {"_id": c["_id"]},
+        {
+            "$set": {"savvy_points_awarded": SAVVY_REDEMPTION_POINTS},
+            "$unset": {"savvy_points_award_pending": ""},
+        },
+    )
     return {
         "ok": True,
         "code": c["code"],
@@ -4401,6 +5373,7 @@ async def scan_redeem(body: ScanIn, scanner=Depends(get_scanner_user)):
         "student_number": user.get("student_number", ""),
         "approved_by": scanner.get("name", ""),
         "outlet_id": str(c.get("outlet_id")) if c.get("outlet_id") else None,
+        "savvy_points_awarded": SAVVY_REDEMPTION_POINTS,
     }
 
 
@@ -4883,12 +5856,59 @@ async def seed_admin():
                 "email_verified": True,
                 "verification_status": "approved",
                 "student_number": "SCD-ADMIN",
+                "savvy_points_balance": 0,
+                "savvy_points_lifetime": 0,
                 "reward_points": 0,
                 "referral_code": "ADMIN",
                 "created_at": datetime.now(timezone.utc),
             }
         )
         logger.info("Seeded admin user")
+
+
+async def migrate_savvy_points():
+    """Carry legacy totals forward without rewriting or taking points away."""
+    cursor = db.users.find(
+        {
+            "$or": [
+                {"savvy_points_balance": {"$exists": False}},
+                {"savvy_points_lifetime": {"$exists": False}},
+            ]
+        }
+    )
+    async for user in cursor:
+        legacy_balance = int(user.get("reward_points", 0) or 0)
+        await db.users.update_one(
+            {"_id": user["_id"]},
+            {
+                "$set": {
+                    "savvy_points_balance": legacy_balance,
+                    "savvy_points_lifetime": legacy_balance,
+                    "reward_points": legacy_balance,
+                }
+            },
+        )
+        if legacy_balance:
+            try:
+                await db.savvy_points_transactions.insert_one(
+                    {
+                        "user_id": user["_id"],
+                        "amount": legacy_balance,
+                        "event_type": "legacy_balance",
+                        "source_id": str(user["_id"]),
+                        "event_key": f"legacy_balance:{user['_id']}:{user['_id']}",
+                        "title": "Savvy Points balance brought forward",
+                        "description": "Your existing rewards are safe in the new Savvy Points experience.",
+                        "status": "earned",
+                        "created_at": datetime.now(timezone.utc),
+                    }
+                )
+            except DuplicateKeyError:
+                pass
+    await db.referrals.update_many(
+        {"status": {"$exists": False}, "points_awarded": {"$gt": 0}},
+        {"$set": {"status": "awarded"}},
+    )
 
 
 @app.on_event("startup")
@@ -4918,6 +5938,27 @@ async def on_startup():
         await db.verifications.create_index([("status", 1), ("submitted_at", -1)])
         await db.referrals.create_index(
             [("referrer_id", 1), ("created_at", -1)]
+        )
+        await db.referrals.create_index([("referred_id", 1), ("status", 1)])
+        await db.savvy_points_transactions.create_index("event_key", unique=True)
+        await db.savvy_points_transactions.create_index(
+            [("user_id", 1), ("created_at", -1)]
+        )
+        await db.savvy_level_rewards.create_index(
+            [("user_id", 1), ("tier_key", 1)], unique=True
+        )
+        await db.savvy_level_rewards.create_index("code", unique=True)
+        await db.savvy_level_rewards.create_index(
+            [("status", 1), ("expires_at", 1)]
+        )
+        await db.announcements.create_index(
+            [("published", 1), ("audience", 1), ("starts_at", 1), ("expires_at", 1)]
+        )
+        await db.announcement_receipts.create_index(
+            [("user_id", 1), ("announcement_id", 1)], unique=True
+        )
+        await db.announcement_receipts.create_index(
+            [("announcement_id", 1), ("seen_at", 1), ("clicked_at", 1)]
         )
         await db.outlet_daily_redemptions.create_index(
             [("user_id", 1), ("outlet_id", 1), ("day", 1)], unique=True
@@ -4951,6 +5992,7 @@ async def on_startup():
         },
     )
     await seed_admin()
+    await migrate_savvy_points()
     await seed_offers()
     await seed_outlets()
     # Migrate existing coupons + student QRs from pipe-payload to URL format,

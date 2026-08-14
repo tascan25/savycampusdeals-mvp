@@ -1,7 +1,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowRight, BadgeCheck, Sparkles, ShieldCheck, Zap, Users, Star, ChevronDown, MapPin, Utensils, Instagram, Mail } from "lucide-react";
+import { ArrowRight, BadgeCheck, ShieldCheck, Zap, Users, Star, ChevronDown, MapPin, Utensils, Instagram, Mail } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import api from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
@@ -134,28 +134,39 @@ export default function Landing() {
               className="absolute top-8 right-4 w-[400px]"
               style={{ transform: "perspective(1200px) rotateY(-14deg) rotateX(6deg) rotate(-6deg)" }}
             >
-              <div className="holo holo-shine rounded-3xl p-6 aspect-[1.586/1] border border-white/10 shadow-[0_40px_100px_-20px_rgba(79,70,229,0.55)] overflow-hidden relative">
-                <div className="absolute inset-0 opacity-[0.06]" style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")" }}/>
-                <div className="relative flex items-start justify-between">
-                  <div>
-                    <div className="text-[10px] uppercase tracking-[0.3em] text-white/60">SavyCampusDeals</div>
-                    <div className="font-display text-2xl font-extrabold mt-1 flex items-center gap-2">Student Pass <Sparkles size={16} className="text-emerald-300"/></div>
-                  </div>
-                  <div className="flex items-center gap-1.5 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-[11px] font-semibold px-2.5 py-1">
-                    <BadgeCheck size={14}/> Verified
-                  </div>
-                </div>
-                <div className="relative mt-6 flex items-end justify-between">
-                  <div>
-                    <div className="text-[10px] uppercase tracking-[0.25em] text-white/50">Name</div>
-                    <div className="font-display text-lg font-bold">Aarav Sharma</div>
-                    <div className="text-[10px] uppercase tracking-[0.25em] text-white/50 mt-3">College</div>
-                    <div className="text-sm text-white/90">IIT Bombay</div>
-                  </div>
-                  <div className="rounded-xl bg-white p-1.5">
-                    <div className="h-20 w-20 grid grid-cols-8 grid-rows-8 gap-[1px]">
-                      {[...Array(64)].map((_, k) => <div key={k} className={`${(k * 7) % 3 === 0 ? "bg-black" : "bg-white"}`}/>)}
+              <div className="savvy-pass relative aspect-[1.586/1] overflow-hidden rounded-[1.6rem] border border-teal-100/25 shadow-[0_40px_100px_-20px_rgba(20,184,166,0.65)]">
+                <div className="savvy-pass-grid absolute inset-0" />
+                <div className="savvy-pass-orbit absolute" />
+                <div className="absolute -right-[7%] -top-[24%] font-display text-[12rem] font-black leading-none tracking-[-0.12em] text-teal-50/[0.045]">S</div>
+                <div className="relative z-10 flex h-full flex-col p-6">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <div className="grid h-7 w-7 place-items-center rounded-[0.55rem] border border-white/25 bg-white/95 font-display text-sm font-black italic text-teal-950 shadow-lg">S</div>
+                      <div>
+                        <p className="text-[9px] font-extrabold uppercase tracking-[0.28em] text-teal-50/90">Savvy Campus</p>
+                        <p className="mt-0.5 text-[8px] font-semibold uppercase tracking-[0.2em] text-teal-50/45">Student membership</p>
+                      </div>
                     </div>
+                    <div className="flex items-center gap-1.5 rounded-full border border-white/70 bg-[#f1fffb]/95 px-2.5 py-1 text-[10px] font-extrabold text-teal-950 shadow-lg">
+                      <BadgeCheck size={13}/> Verified
+                    </div>
+                  </div>
+                  <div className="mt-auto flex items-end justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="mb-3 h-0.5 w-10 bg-gradient-to-r from-teal-200 via-cyan-300 to-transparent" />
+                      <p className="text-[8px] font-bold uppercase tracking-[0.24em] text-teal-50/45">Member</p>
+                      <p className="mt-1 font-display text-xl font-extrabold leading-none text-white">Aarav Sharma</p>
+                      <p className="mt-2 text-xs font-semibold text-teal-50/70">IIT Bombay</p>
+                    </div>
+                    <div className="rounded-[0.9rem] border border-white/20 bg-white p-1.5 shadow-xl">
+                      <div className="grid h-[4.5rem] w-[4.5rem] grid-cols-8 grid-rows-8 gap-[1px]">
+                        {[...Array(64)].map((_, k) => <div key={k} className={`${(k * 7) % 3 === 0 ? "bg-black" : "bg-white"}`}/>)}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex items-end justify-between border-t border-teal-50/15 pt-2.5">
+                    <div><p className="text-[7px] font-bold uppercase tracking-[0.24em] text-teal-50/40">Member ID</p><p className="mt-0.5 font-mono text-[9px] font-bold tracking-wider text-teal-50/85">SC25-08421</p></div>
+                    <div className="text-right"><p className="text-[7px] font-bold uppercase tracking-[0.24em] text-teal-50/40">Valid through</p><p className="mt-0.5 text-[9px] font-bold text-teal-50/85">May 2027</p></div>
                   </div>
                 </div>
               </div>

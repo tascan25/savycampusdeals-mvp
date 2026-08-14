@@ -80,7 +80,7 @@ export default function AdminReferralsPage({ openUser }) {
       tint: "text-emerald-300",
     },
     {
-      label: "Points awarded",
+      label: "Savvy Points awarded",
       value: summary?.points_awarded,
       detail: "Referral rewards issued to referrers",
       icon: Sparkles,
@@ -249,7 +249,7 @@ export default function AdminReferralsPage({ openUser }) {
                               </span>
                             </td>
                             <td className="px-5 py-3 text-zinc-400">{dateText(student.joined_at)}</td>
-                            <td className="px-5 py-3 text-amber-200">+{student.points_awarded} pts</td>
+                            <td className="px-5 py-3 text-amber-200">+{student.points_awarded} Savvy Points</td>
                           </tr>
                         ))}
                       </tbody>

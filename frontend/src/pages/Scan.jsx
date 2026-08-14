@@ -3,7 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Html5Qrcode } from "html5-qrcode";
 import { useQuery } from "@tanstack/react-query";
-import { QrCode, ScanLine, BadgeCheck, ShieldAlert, Ticket, CheckCircle2, X, Camera, Keyboard, Loader2 } from "lucide-react";
+import { QrCode, ScanLine, BadgeCheck, ShieldAlert, Ticket, CheckCircle2, X, Camera, Keyboard, Loader2, Gift } from "lucide-react";
 import { toast } from "sonner";
 import Navbar from "@/components/Navbar";
 import api, { formatApiError } from "@/lib/api";
@@ -46,6 +46,41 @@ function ResultCard({ result, onRedeem, onClose, redeeming }) {
             </div>
           </div>
         </div>
+      </motion.div>
+    );
+  }
+
+  if (result.kind === "level_reward") {
+    const active = result.status === "active" && !result.expired;
+    const studentOk = result.student_verified;
+    return (
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-heavy relative w-full max-w-md overflow-hidden rounded-3xl border border-amber-300/20 p-6" data-testid="scan-level-reward-result">
+        <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-violet-500 via-fuchsia-400 to-amber-300" />
+        <button onClick={onClose} className="absolute right-4 top-4 text-zinc-400 hover:text-white"><X size={18}/></button>
+        <div className="inline-flex items-center gap-1.5 rounded-full border border-amber-300/25 bg-amber-300/10 px-3 py-1 text-xs font-semibold text-amber-200"><Gift size={14}/> Savvy level reward</div>
+        <p className="mt-5 text-[10px] font-bold uppercase tracking-[0.22em] text-violet-300">{result.tier_name}</p>
+        <h2 className="mt-2 font-display text-2xl font-extrabold leading-tight">{result.reward_title}</h2>
+        <div className="mt-5 rounded-2xl border border-white/10 bg-black/25 p-4">
+          <p className="text-[10px] uppercase tracking-widest text-zinc-500">Reward belongs to</p>
+          <p className="mt-1 font-display text-xl font-bold">{result.student_name || "—"}</p>
+          <p className="mt-1 text-sm text-zinc-400">{result.student_college || result.student_number || "—"}</p>
+          <div className={`mt-3 inline-flex items-center gap-1.5 text-xs font-semibold ${studentOk ? "text-emerald-300" : "text-rose-300"}`}>
+            {studentOk ? <BadgeCheck size={14}/> : <ShieldAlert size={14}/>} {studentOk ? "Verified student" : "Student verification inactive"}
+          </div>
+        </div>
+        <div className="mt-4 flex items-center justify-between gap-3 rounded-xl bg-white/[0.04] p-3">
+          <div><p className="text-[10px] uppercase tracking-widest text-zinc-500">Reward code</p><p className="mt-1 font-mono text-sm font-bold">{result.code}</p></div>
+          <div className="text-right"><p className="text-[10px] uppercase tracking-widest text-zinc-500">Valid until</p><p className="mt-1 text-sm">{result.expires_at ? new Date(result.expires_at).toLocaleDateString("en-IN") : "—"}</p></div>
+        </div>
+        {active && studentOk ? (
+          <button data-testid="scan-redeem-level-reward-btn" disabled={redeeming} onClick={onRedeem} className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-full bg-white py-3 font-semibold text-black transition-transform hover:scale-[1.02] disabled:opacity-60">
+            {redeeming ? <Loader2 size={16} className="animate-spin"/> : <><CheckCircle2 size={16}/> Approve reward redemption</>}
+          </button>
+        ) : (
+          <div className={`mt-6 rounded-xl border p-3 text-center text-sm ${result.status === "redeemed" ? "border-violet-400/20 bg-violet-500/10 text-violet-200" : "border-rose-400/20 bg-rose-500/10 text-rose-200"}`}>
+            {result.status === "redeemed" ? `Already redeemed on ${new Date(result.redeemed_at).toLocaleString("en-IN")}` : result.expired ? "This reward has expired." : "Do not approve — student verification is inactive."}
+          </div>
+        )}
       </motion.div>
     );
   }
@@ -141,9 +176,10 @@ export default function Scan() {
   const location = useLocation();
   const urlParams = new URLSearchParams(location.search);
   const urlCode = urlParams.get("c");         // coupon code
+  const urlReward = urlParams.get("r");       // level reward code
   const urlStudent = urlParams.get("s");      // student number
   const urlPayload = urlParams.get("p");      // raw payload (legacy)
-  const cameFromQrScan = Boolean(urlCode || urlStudent || urlPayload);
+  const cameFromQrScan = Boolean(urlCode || urlReward || urlStudent || urlPayload);
 
   const [mode, setMode] = useState(cameFromQrScan ? "manual" : "camera");
   const [manual, setManual] = useState("");
@@ -167,6 +203,7 @@ export default function Scan() {
       setResult(data);
       if (data.kind === "student") toast.success(data.verified ? "Verified student!" : "Not verified");
       if (data.kind === "coupon") toast.success("Coupon found");
+      if (data.kind === "level_reward") toast.success("Level reward found");
     } catch (e) {
       const msg = formatApiError(e.response?.data?.detail);
       setErr(msg);
@@ -177,7 +214,7 @@ export default function Scan() {
   // Auto-lookup when the user lands here from a QR-code URL scanned by their phone camera.
   useEffect(() => {
     if (autoLookupRef.current) return;
-    const value = urlCode || urlStudent || urlPayload;
+    const value = urlCode || urlReward || urlStudent || urlPayload;
     if (value) {
       autoLookupRef.current = true;
       lookup(value);
@@ -238,11 +275,11 @@ export default function Scan() {
   };
 
   const onRedeem = async () => {
-    if (!result || result.kind !== "coupon") return;
+    if (!result || !["coupon", "level_reward"].includes(result.kind)) return;
     setRedeeming(true);
     try {
       const { data } = await api.post("/scan/redeem", { payload: result.code });
-      toast.success(`Redeemed ${data.brand} coupon for ${data.student_name}`);
+      toast.success(data.kind === "level_reward" ? `${data.tier_name} reward redeemed for ${data.student_name}` : `Redeemed ${data.brand} coupon for ${data.student_name}`);
       setResult({ ...result, status: "redeemed", redeemed_at: data.redeemed_at });
     } catch (e) {
       toast.error(formatApiError(e.response?.data?.detail));
@@ -301,7 +338,7 @@ export default function Scan() {
                   data-testid="scan-manual-input"
                   value={manual}
                   onChange={(e) => setManual(e.target.value)}
-                  placeholder="SCD-2026-XXXXXX or SCD-XXXXXXXX"
+                  placeholder="SCD-XXXXXXXX or SVR-XXXXXXXXXX"
                   className="mt-2 w-full rounded-xl bg-white/5 border border-white/10 px-4 py-3 text-white font-mono focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/40 focus:outline-none"
                 />
                 <button data-testid="scan-manual-submit" className="mt-4 rounded-full bg-white text-black font-semibold py-3">Look up</button>
@@ -321,7 +358,7 @@ export default function Scan() {
                     </div>
                     <div className="mt-3 font-display font-semibold text-lg">Waiting for a scan</div>
                     <div className="text-sm text-zinc-400 mt-1">
-                      Scanning a <span className="text-emerald-300">student pass</span> shows verification. Scanning a <span className="text-indigo-300">coupon</span> allows redemption.
+                      Scan a <span className="text-emerald-300">student pass</span>, <span className="text-indigo-300">coupon</span>, or <span className="text-amber-200">level reward</span>.
                     </div>
                     {err && <div className="mt-4 text-xs text-red-400">{err}</div>}
                   </div>

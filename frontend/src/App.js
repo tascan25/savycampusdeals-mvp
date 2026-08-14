@@ -23,33 +23,36 @@ import OutletDetail from "@/pages/OutletDetail";
 import Scan from "@/pages/Scan";
 import AdminPortal from "@/pages/AdminPortal";
 import PublicStudentPass from "@/pages/PublicStudentPass";
+import { AnnouncementProvider } from "@/context/AnnouncementsContext";
 
 export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
-        <Toaster theme="dark" position="top-center" richColors closeButton />
-        <Routes>
-          <Route path="/" element={<Landing />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<Signup />} />
-          <Route path="/forgot-password" element={<ForgotPassword />} />
-          <Route path="/reset-password/:token" element={<ResetPassword />} />
-          <Route path="/verify-email/:token" element={<VerifyEmail />} />
-          <Route path="/verify-email" element={<VerifyEmailOtp />} />
-          <Route path="/offers" element={<Offers />} />
-          <Route path="/offers/:id" element={<OfferDetail />} />
-          <Route path="/outlets" element={<Outlets />} />
-          <Route path="/outlets/:id" element={<OutletDetail />} />
-          <Route path="/verify-pass" element={<PublicStudentPass />} />
-          <Route path="/scan" element={<ProtectedRoute requirePartner><Scan /></ProtectedRoute>} />
-          <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-          <Route path="/verify" element={<ProtectedRoute><Verify /></ProtectedRoute>} />
-          <Route path="/card" element={<ProtectedRoute><StudentCard /></ProtectedRoute>} />
-          <Route path="/saved" element={<ProtectedRoute><SavedOffers /></ProtectedRoute>} />
-          <Route path="/coupons" element={<ProtectedRoute><MyCoupons /></ProtectedRoute>} />
-          <Route path="/admin/*" element={<ProtectedRoute requireAdmin><AdminPortal /></ProtectedRoute>} />
-        </Routes>
+        <AnnouncementProvider>
+          <Toaster theme="dark" position="top-center" richColors closeButton />
+          <Routes>
+            <Route path="/" element={<Landing />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<Signup />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password/:token" element={<ResetPassword />} />
+            <Route path="/verify-email/:token" element={<VerifyEmail />} />
+            <Route path="/verify-email" element={<VerifyEmailOtp />} />
+            <Route path="/offers" element={<Offers />} />
+            <Route path="/offers/:id" element={<OfferDetail />} />
+            <Route path="/outlets" element={<Outlets />} />
+            <Route path="/outlets/:id" element={<OutletDetail />} />
+            <Route path="/verify-pass" element={<PublicStudentPass />} />
+            <Route path="/scan" element={<ProtectedRoute requirePartner><Scan /></ProtectedRoute>} />
+            <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+            <Route path="/verify" element={<ProtectedRoute><Verify /></ProtectedRoute>} />
+            <Route path="/card" element={<ProtectedRoute><StudentCard /></ProtectedRoute>} />
+            <Route path="/saved" element={<ProtectedRoute><SavedOffers /></ProtectedRoute>} />
+            <Route path="/coupons" element={<ProtectedRoute><MyCoupons /></ProtectedRoute>} />
+            <Route path="/admin/*" element={<ProtectedRoute requireAdmin><AdminPortal /></ProtectedRoute>} />
+          </Routes>
+        </AnnouncementProvider>
       </BrowserRouter>
     </AuthProvider>
   );

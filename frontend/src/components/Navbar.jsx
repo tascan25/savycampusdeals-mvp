@@ -1,18 +1,21 @@
 import React, { useState } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Menu, X, LogOut, User } from "lucide-react";
+import { Bell, Menu, X, LogOut } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { useAnnouncements } from "@/context/AnnouncementsContext";
 
 const links = [
   { to: "/offers", label: "Offers" },
   { to: "/outlets", label: "Outlets" },
   { to: "/dashboard", label: "Dashboard", protected: true },
+  { to: "/coupons", label: "My Coupons", protected: true },
   { to: "/card", label: "My Card", protected: true },
 ];
 
 export default function Navbar() {
   const { user, ready, logout } = useAuth();
+  const { unreadCount, openAnnouncements } = useAnnouncements();
   const [open, setOpen] = useState(false);
   const nav = useNavigate();
   const visibleLinks = user?.role === "outlet_partner"
@@ -53,6 +56,12 @@ export default function Navbar() {
             <div className="h-9 w-24 animate-pulse rounded-full bg-white/10" aria-label="Loading account navigation" />
           ) : user ? (
             <>
+              {["student", "outlet_partner"].includes(user.role) && (
+                <button type="button" onClick={openAnnouncements} aria-label={`What’s new${unreadCount ? `, ${unreadCount} unread` : ""}`} className="relative grid h-9 w-9 place-items-center rounded-full text-zinc-300 transition hover:bg-white/10 hover:text-white" data-testid="nav-announcements">
+                  <Bell size={16} />
+                  {unreadCount > 0 && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-violet-300 ring-2 ring-[#111116]" />}
+                </button>
+              )}
               <Link to={accountHome} data-testid="nav-avatar" className="hidden md:flex h-9 w-9 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 items-center justify-center text-sm font-bold">
                 {(user.name || "S")[0].toUpperCase()}
               </Link>

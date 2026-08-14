@@ -80,8 +80,9 @@ class TestReferralRewards:
         })
         assert rB.status_code == 200, rB.text
         dataB = rB.json()
-        # B gets 100 welcome + 200 referral
-        assert dataB["user"]["reward_points"] == 300, dataB
+        # B gets the welcome award now; both referral bonuses stay pending
+        # until B completes student verification.
+        assert dataB["user"]["reward_points"] == 100, dataB
 
         # Verify A's balance bumped by 200 via mongosh
         out = subprocess.run(
@@ -91,7 +92,7 @@ class TestReferralRewards:
         )
         assert out.returncode == 0, out.stderr
         val = out.stdout.strip().splitlines()[-1].strip()
-        assert val == "300", f"referrer points expected 300 got {val!r} (stdout={out.stdout!r})"
+        assert val == "100", f"referrer points should stay pending, got {val!r} (stdout={out.stdout!r})"
 
         # Verify db.referrals doc exists
         out2 = subprocess.run(
@@ -100,7 +101,9 @@ class TestReferralRewards:
             capture_output=True, text=True, timeout=15,
         )
         assert out2.returncode == 0
-        assert '"points_awarded":200' in out2.stdout.replace(" ", ""), out2.stdout
+        referral_doc = out2.stdout.replace(" ", "")
+        assert '"points_awarded":0' in referral_doc, out2.stdout
+        assert '"status":"pending"' in referral_doc, out2.stdout
 
     def test_invalid_referral_code_returns_400(self, session):
         r = session.post(f"{API}/auth/register", json={

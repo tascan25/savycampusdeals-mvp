@@ -9,7 +9,7 @@ import api from "@/lib/api";
 const statCards = [
   { key: "claimed", label: "Claimed Coupons", icon: Ticket, to: "/coupons", tint: "from-indigo-500 to-purple-600" },
   { key: "redeemed", label: "Redeemed Coupons", icon: Check, to: "/coupons", tint: "from-emerald-500 to-teal-500" },
-  { key: "reward_points", label: "Reward Points", icon: Trophy, tint: "from-amber-400 to-pink-500" },
+  { key: "savvy_points_balance", label: "Savvy Points", icon: Trophy, tint: "from-amber-400 to-pink-500" },
 ];
 
 function StatValue({ loading, value }) {
@@ -55,7 +55,7 @@ export default function MemberOverviewBanner({ user }) {
   const values = {
     claimed: stats.data?.claimed,
     redeemed: stats.data?.redeemed,
-    reward_points: stats.data?.reward_points ?? (!stats.isLoading ? user?.reward_points : undefined),
+    savvy_points_balance: stats.data?.savvy_points_balance ?? (!stats.isLoading ? user?.savvy_points_balance : undefined),
   };
 
   useEffect(() => {
@@ -90,7 +90,7 @@ export default function MemberOverviewBanner({ user }) {
           <div className="absolute -right-20 -top-24 h-72 w-72 rounded-full bg-purple-500/15 blur-3xl" aria-hidden="true" />
           <div className="relative">
             <div className="max-w-3xl">
-              <div className="text-[10px] uppercase tracking-[0.3em] text-indigo-300">Your Savy membership</div>
+              <div className="text-[10px] uppercase tracking-[0.3em] text-indigo-300">Your Savvy membership</div>
               <h2 id="member-overview-title" className="mt-3 font-display text-3xl font-extrabold tracking-tight md:text-5xl">
                 {firstName ? `Welcome back, ${firstName} 👋` : "Welcome back 👋"}
               </h2>

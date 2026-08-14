@@ -6,6 +6,7 @@ import { Sparkles, ShieldAlert, ShieldCheck, Ticket, Bookmark, Gift, ArrowRight,
 import Navbar from "@/components/Navbar";
 import DigitalStudentCard from "@/components/DigitalStudentCard";
 import OfferCard from "@/components/OfferCard";
+import SavvyPointsHub from "@/components/SavvyPointsHub";
 import api from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
@@ -17,6 +18,11 @@ export default function Dashboard() {
   const stats = useQuery({
     queryKey: ["dashboard-stats", user?.id],
     queryFn: async ({ signal }) => (await api.get("/dashboard/stats", { signal })).data,
+    enabled: Boolean(user?.id),
+  });
+  const savvyPoints = useQuery({
+    queryKey: ["savvy-points-overview", user?.id],
+    queryFn: async ({ signal }) => (await api.get("/savvy-points/overview", { signal })).data,
     enabled: Boolean(user?.id),
   });
   const card = useQuery({
@@ -65,6 +71,8 @@ export default function Dashboard() {
           </motion.div>
         )}
 
+        <SavvyPointsHub overview={savvyPoints.data} loading={savvyPoints.isLoading} />
+
         {/* Top grid: student card + stats */}
         <div className="mt-10 grid lg:grid-cols-5 gap-6 items-start">
           <div className="lg:col-span-3">
@@ -85,7 +93,7 @@ export default function Dashboard() {
             {[
               { k: "claimed", label: "Claimed", icon: Ticket, tint: "from-indigo-500 to-purple-600" },
               { k: "saved", label: "Saved", icon: Bookmark, tint: "from-blue-500 to-sky-400" },
-              { k: "reward_points", label: "Points", icon: Trophy, tint: "from-amber-400 to-pink-500" },
+              { k: "savvy_points_balance", label: "Savvy Points", icon: Trophy, tint: "from-amber-400 to-pink-500" },
               { k: "active", label: "Active coupons", icon: Gift, tint: "from-emerald-500 to-teal-400" },
             ].map((s) => (
               <div key={s.k} className="glass rounded-2xl p-4">
@@ -106,7 +114,7 @@ export default function Dashboard() {
                   className="text-xs rounded-full bg-white/10 hover:bg-white/20 px-3 py-1.5"
                 >Copy</button>
               </div>
-              <div className="text-xs text-zinc-500 mt-2">Refer friends, earn 100 pts each.</div>
+              <div className="text-xs text-zinc-500 mt-2">You both earn 100 Savvy Points after they verify.</div>
             </div>
           </div>
         </div>
