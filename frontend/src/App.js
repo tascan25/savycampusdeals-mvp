@@ -23,6 +23,9 @@ import OutletDetail from "@/pages/OutletDetail";
 import Scan from "@/pages/Scan";
 import AdminPortal from "@/pages/AdminPortal";
 import PublicStudentPass from "@/pages/PublicStudentPass";
+import LegalPage from "@/pages/LegalPage";
+import Support from "@/pages/Support";
+import CookieConsent from "@/components/CookieConsent";
 import { AnnouncementProvider } from "@/context/AnnouncementsContext";
 
 export default function App() {
@@ -31,6 +34,7 @@ export default function App() {
       <BrowserRouter>
         <AnnouncementProvider>
           <Toaster theme="dark" position="top-center" richColors closeButton />
+          <CookieConsent />
           <Routes>
             <Route path="/" element={<Landing />} />
             <Route path="/login" element={<Login />} />
@@ -44,6 +48,10 @@ export default function App() {
             <Route path="/outlets" element={<Outlets />} />
             <Route path="/outlets/:id" element={<OutletDetail />} />
             <Route path="/verify-pass" element={<PublicStudentPass />} />
+            <Route path="/terms" element={<LegalPage />} />
+            <Route path="/privacy" element={<LegalPage />} />
+            <Route path="/cookies" element={<LegalPage />} />
+            <Route path="/support" element={<Support />} />
             <Route path="/scan" element={<ProtectedRoute requirePartner><Scan /></ProtectedRoute>} />
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="/verify" element={<ProtectedRoute><Verify /></ProtectedRoute>} />

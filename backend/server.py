@@ -715,6 +715,108 @@ def verification_email_html(
     </div>"""
 
 
+def welcome_email_first_name(user: dict) -> str:
+    clean_name = re.sub(r"[\r\n]+", " ", user.get("name") or "").strip()
+    return (clean_name.split()[0] if clean_name else "student")[:40]
+
+
+def welcome_email_html(user: dict) -> str:
+    """Render the one-time welcome email sent after signup email verification."""
+    first_name = html.escape(welcome_email_first_name(user))
+    verify_url = f"{FRONTEND_URL.rstrip('/')}/verify"
+    terms_url = f"{FRONTEND_URL.rstrip('/')}/terms"
+    privacy_url = f"{FRONTEND_URL.rstrip('/')}/privacy"
+    support_url = f"{FRONTEND_URL.rstrip('/')}/support"
+    return f"""<!doctype html>
+<html lang="en">
+  <body style="margin:0;background:#050505;color:#ffffff;font-family:Manrope,Arial,sans-serif;">
+    <div style="display:none;max-height:0;overflow:hidden;color:transparent;">Your Savvy account is ready. Start unlocking student-only deals and perks.</div>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#050505;padding:28px 12px;">
+      <tr><td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;border:1px solid #27272a;border-radius:28px;overflow:hidden;background:#0b0b0e;">
+          <tr><td style="padding:36px 38px 18px;background:#11111a;">
+            <div style="font-size:12px;letter-spacing:2.4px;color:#a5b4fc;font-weight:800;">SAVVY CAMPUS</div>
+            <h1 style="margin:20px 0 12px;font-family:Outfit,Arial,sans-serif;font-size:42px;line-height:1.05;letter-spacing:-1.2px;">You&rsquo;re in, {first_name}.<br />No gatekeeping. ✨</h1>
+            <p style="margin:0;color:#c4c4cc;font-size:16px;line-height:1.7;">Your student budget just got a glow-up. Savvy puts online perks, nearby deals and members-only savings in one place.</p>
+          </td></tr>
+          <tr><td style="padding:12px 38px 34px;">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:10px 0 24px;border:1px solid #3730a3;border-radius:18px;background:#17172a;">
+              <tr><td style="padding:20px;">
+                <div style="font-size:12px;letter-spacing:1.6px;color:#a5b4fc;font-weight:800;">WELCOME DROP</div>
+                <div style="margin-top:6px;font-family:Outfit,Arial,sans-serif;font-size:25px;font-weight:800;">100 Savvy Points are already yours</div>
+                <div style="margin-top:6px;color:#a1a1aa;font-size:14px;line-height:1.6;">Complete student verification next to unlock even more points and verified-only offers.</div>
+              </td></tr>
+            </table>
+            <div style="font-family:Outfit,Arial,sans-serif;font-size:20px;font-weight:800;margin-bottom:14px;">Here&rsquo;s the vibe</div>
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="color:#d4d4d8;font-size:15px;line-height:1.65;">
+              <tr><td width="28" valign="top" style="color:#818cf8;">01</td><td style="padding-bottom:12px;"><strong style="color:#fff;">Verify your student status</strong><br />Get your digital student pass and unlock verified-only perks.</td></tr>
+              <tr><td width="28" valign="top" style="color:#818cf8;">02</td><td style="padding-bottom:12px;"><strong style="color:#fff;">Find deals worth the screenshot</strong><br />Browse brand offers and nearby campus favourites.</td></tr>
+              <tr><td width="28" valign="top" style="color:#818cf8;">03</td><td><strong style="color:#fff;">Save, claim, repeat</strong><br />Keep coupons and favourites together. Low-key organised, high-key useful.</td></tr>
+            </table>
+            <a href="{verify_url}" style="display:block;margin-top:28px;padding:15px 22px;border-radius:999px;background:#ffffff;color:#09090b;text-decoration:none;text-align:center;font-weight:800;">Unlock my student perks →</a>
+            <p style="margin:24px 0 0;color:#71717a;font-size:13px;line-height:1.6;">Need a hand? We&rsquo;ve got you. Visit <a href="{support_url}" style="color:#a5b4fc;">Savvy Support</a> to reach our team.</p>
+          </td></tr>
+          <tr><td style="padding:22px 38px;border-top:1px solid #27272a;color:#71717a;font-size:11px;line-height:1.7;">
+            You received this transactional email because you created and verified a Savvy Campus account.<br />
+            <a href="{terms_url}" style="color:#a1a1aa;">Terms</a>&nbsp;&nbsp;·&nbsp;&nbsp;<a href="{privacy_url}" style="color:#a1a1aa;">Privacy</a>&nbsp;&nbsp;·&nbsp;&nbsp;<a href="{support_url}" style="color:#a1a1aa;">Support</a>
+          </td></tr>
+        </table>
+      </td></tr>
+    </table>
+  </body>
+</html>"""
+
+
+async def send_welcome_email_once(user: dict) -> dict:
+    """Claim and send a signup welcome email once, without blocking verification."""
+    if not user.get("welcome_email_eligible") or user.get("welcome_email_sent_at"):
+        return {"ok": True, "skipped": True, "error": None}
+
+    now = datetime.now(timezone.utc)
+    claimed = await db.users.find_one_and_update(
+        {
+            "_id": user["_id"],
+            "welcome_email_eligible": True,
+            "welcome_email_sent_at": {"$exists": False},
+            "welcome_email_sending_at": {"$exists": False},
+        },
+        {
+            "$set": {"welcome_email_sending_at": now},
+            "$inc": {"welcome_email_attempts": 1},
+        },
+        return_document=ReturnDocument.AFTER,
+    )
+    if not claimed:
+        return {"ok": True, "skipped": True, "error": None}
+
+    first_name = welcome_email_first_name(claimed)
+    result = send_email(
+        claimed["email"],
+        f"You’re in, {first_name} — welcome to Savvy ✨",
+        welcome_email_html(claimed),
+    )
+    if result["ok"]:
+        await db.users.update_one(
+            {"_id": claimed["_id"], "welcome_email_sending_at": now},
+            {
+                "$set": {"welcome_email_sent_at": datetime.now(timezone.utc)},
+                "$unset": {
+                    "welcome_email_sending_at": "",
+                    "welcome_email_last_error": "",
+                },
+            },
+        )
+    else:
+        await db.users.update_one(
+            {"_id": claimed["_id"], "welcome_email_sending_at": now},
+            {
+                "$set": {"welcome_email_last_error": result["error"]},
+                "$unset": {"welcome_email_sending_at": ""},
+            },
+        )
+    return {**result, "skipped": False}
+
+
 def generate_qr_data_uri(payload: str) -> str:
     qr = qrcode.QRCode(
         box_size=8, border=2, error_correction=qrcode.constants.ERROR_CORRECT_M
@@ -1008,6 +1110,8 @@ async def register(body: RegisterIn, response: Response):
         "phone": body.phone or "",
         "avatar_url": "",
         "email_verified": False,
+        "welcome_email_eligible": True,
+        "welcome_email_attempts": 0,
         "email_verify_token": verify_token,
         "verification_status": "not_submitted",
         "student_number": "",
@@ -1264,7 +1368,13 @@ async def verify_otp(body: OtpVerifyIn):
     if not user:
         raise HTTPException(404, "No account with that email")
     if user.get("email_verified"):
-        return {"ok": True, "already_verified": True, "user": serialize_user(user)}
+        welcome_result = await send_welcome_email_once(user)
+        return {
+            "ok": True,
+            "already_verified": True,
+            "user": serialize_user(user),
+            "welcome_email_sent": welcome_result["ok"],
+        }
     doc = await db.otp_codes.find_one(
         {"user_id": user["_id"], "used": False},
         sort=[("created_at", -1)],
@@ -1295,7 +1405,16 @@ async def verify_otp(body: OtpVerifyIn):
         user_updates["reverification_email_verified_at"] = datetime.now(timezone.utc)
     await db.users.update_one({"_id": user["_id"]}, {"$set": user_updates})
     fresh = await db.users.find_one({"_id": user["_id"]})
-    return {"ok": True, "user": serialize_user(fresh)}
+    welcome_result = (
+        await send_welcome_email_once(fresh)
+        if doc.get("purpose", "signup") == "signup"
+        else {"ok": True, "skipped": True, "error": None}
+    )
+    return {
+        "ok": True,
+        "user": serialize_user(fresh),
+        "welcome_email_sent": welcome_result["ok"],
+    }
 
 
 @api.post("/auth/login")
@@ -1330,7 +1449,13 @@ async def verify_email(token: str):
         {"_id": user["_id"]},
         {"$set": {"email_verified": True}, "$unset": {"email_verify_token": ""}},
     )
-    return {"ok": True, "message": "Email verified"}
+    fresh = await db.users.find_one({"_id": user["_id"]})
+    welcome_result = await send_welcome_email_once(fresh)
+    return {
+        "ok": True,
+        "message": "Email verified",
+        "welcome_email_sent": welcome_result["ok"],
+    }
 
 
 @api.post("/auth/forgot-password")
