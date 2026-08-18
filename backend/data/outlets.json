@@ -354,5 +354,37 @@
       "trending": true
     }
   ]
+},
+{
+  "name": "Appetito Club",
+   "tagline": "Play More. Spend Less.",
+ "cuisine": "Sports Club & Recreation",
+   "city": "Greater Noida",
+  "address": "R3, Knowledge Park II, Greater Noida, Uttar Pradesh 201310",
+
+  "lat": 28.468678208551946,
+  "lng": 77.49699022883563,
+
+  "image_url": "/images/outlets/appetito/thumbnail.webp",
+  "cover_url": "/images/outlets/appetito/cover.webp",
+  "logo_url": "/images/outlets/appetito/logo.webp",
+
+  "phone": "+91 8860023344",
+  "hours": "11:00 AM – 6:00 PM",
+  "rating": 4.5,
+
+  "offers": [
+    {
+      "title": "Flat 10% Off on Sports Facilities",
+      "category": "Sports & Fitness",
+      "discount": "10% OFF",
+      "description": "Verified students get a flat 10% discount on eligible sports facilities at Appetito Club on weekdays between 11:00 AM and 6:00 PM.",
+      "terms": "Valid once per student per day, Monday to Friday from 11:00 AM to 6:00 PM only. Discount applies only to eligible sports facilities and does not apply to food, beverages, or other services. Outlet staff must scan and approve the SavvyCampusDeals QR before billing. Cannot be combined with other offers or discounts.",
+      "redemption_policy": "daily",
+      "validity": "Ongoing",
+      "featured": true,
+      "trending": true
+    }
+  ]
 }
 ]

@@ -72,3 +72,23 @@ def test_new_noida_cafes_use_daily_redemption():
         for outlet in cafes
         for offer in outlet["offers"]
     )
+
+
+def test_appetito_sports_offer_uses_daily_redemption_window():
+    outlets = json.loads((BACKEND_DIR / "data" / "outlets.json").read_text())
+    appetito = next(
+        outlet for outlet in outlets if outlet["name"] == "Appetito Club"
+    )
+    offer = appetito["offers"][0]
+
+    assert offer["category"] == "Sports & Fitness"
+    assert offer["redemption_policy"] == "daily"
+    assert "once per student per day" in offer["terms"].lower()
+    assert "scan and approve" in offer["terms"].lower()
+
+    # Daily coupons expire at the end of the current India calendar day,
+    # rather than receiving the standard 30-day coupon lifetime.
+    now = datetime(2026, 8, 18, 6, 30, tzinfo=timezone.utc)  # 12:00 PM IST
+    assert server.coupon_expiry_for_offer(offer, now) == datetime(
+        2026, 8, 18, 18, 30, tzinfo=timezone.utc
+    )

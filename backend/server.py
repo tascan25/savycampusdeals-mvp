@@ -5080,8 +5080,8 @@ async def claim_offer(offer_id: str, user=Depends(get_verified_user)):
         else:
             return serialize_coupon(existing, offer)
 
-    # Apply the policy configured on this specific outlet offer. Every issued
-    # QR still keeps the same 30-day expiry below.
+    # Apply the policy configured on this specific outlet offer. The QR expiry
+    # is calculated from the same policy below.
     if outlet_oid:
         policy = get_redemption_policy(offer)
         if policy == "daily":
