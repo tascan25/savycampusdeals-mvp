@@ -704,6 +704,14 @@ def normalize_student_id(value: str) -> str:
     return re.sub(r"\s+", "", value).upper()
 
 
+def is_valid_student_id(value: str) -> bool:
+    """Keep ID formats flexible while rejecting email addresses used by mistake."""
+    student_id = value.strip()
+    return bool(student_id) and "@" not in student_id and not re.fullmatch(
+        r"[^\s@]+@[^\s@]+\.[^\s@]+", student_id
+    )
+
+
 def verification_email_html(
     heading: str, body: str, cta_label: str = "Open SavvyCampusDeals", cta_path: str = "/dashboard"
 ) -> str:
@@ -1620,6 +1628,11 @@ async def submit_verification(
         )
     if not body.student_id_number.strip():
         raise HTTPException(400, "Student ID / Roll Number is required")
+    if not is_valid_student_id(body.student_id_number):
+        raise HTTPException(
+            400,
+            "Enter your Student ID / Roll Number, not your email address.",
+        )
 
     student_id_number = body.student_id_number.strip()
     student_id_normalized = normalize_student_id(student_id_number)

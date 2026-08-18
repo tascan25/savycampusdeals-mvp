@@ -7,6 +7,8 @@ import Navbar from "@/components/Navbar";
 import api, { formatApiError } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 
+const looksLikeEmail = (value) => value.includes("@") || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+
 function ImageUpload({ label, value, onChange, testId }) {
   const onFile = (e) => {
     const file = e.target.files?.[0];
@@ -50,6 +52,7 @@ export default function Verify() {
   const [submitted, setSubmitted] = useState(false);
   const [renewing, setRenewing] = useState(false);
   const isCollegeEmail = user?.verification_method === "college_email";
+  const studentIdLooksLikeEmail = looksLikeEmail(f.student_id_number);
 
   const update = (k, v) => setF((p) => ({ ...p, [k]: v }));
 
@@ -146,6 +149,10 @@ export default function Verify() {
   const onSubmit = async (e) => {
     e.preventDefault();
     setErr("");
+    if (studentIdLooksLikeEmail) {
+      setErr("Enter your Student ID / Roll Number, not your email address.");
+      return;
+    }
     if (!isCollegeEmail && (!f.college_id_image || !f.selfie_image)) {
       setErr("Upload both your college ID card and a selfie holding it to continue.");
       return;
@@ -216,8 +223,17 @@ export default function Verify() {
                 value={f[field.k]}
                 placeholder={field.placeholder}
                 onChange={(e) => update(field.k, e.target.value)}
-                className="mt-2 w-full rounded-xl bg-white/5 border border-white/10 px-4 py-3 text-white focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/40 focus:outline-none"
+                autoComplete={field.k === "student_id_number" ? "off" : undefined}
+                aria-describedby={field.k === "student_id_number" ? "student-id-help" : undefined}
+                className={`mt-2 w-full rounded-xl bg-white/5 border px-4 py-3 text-white focus:ring-2 focus:outline-none ${field.k === "student_id_number" && studentIdLooksLikeEmail ? "border-red-400 focus:border-red-400 focus:ring-red-500/40" : "border-white/10 focus:border-indigo-400 focus:ring-indigo-500/40"}`}
               />
+              {field.k === "student_id_number" && (
+                <p id="student-id-help" className={`mt-2 text-xs leading-relaxed ${studentIdLooksLikeEmail ? "text-red-300" : "text-zinc-500"}`}>
+                  {studentIdLooksLikeEmail
+                    ? "Please enter your Student ID / Roll Number — email addresses are not accepted here."
+                    : "Use the Student ID or Roll Number shown on your college records. Do not enter your email address."}
+                </p>
+              )}
               {field.helper && (
                 <p className="mt-2 text-xs leading-relaxed text-zinc-500">
                   {field.helper}
