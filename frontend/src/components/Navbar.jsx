@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { Bell, Menu, X, LogOut, UserRound } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useAnnouncements } from "@/context/AnnouncementsContext";
+import StudentAvatar from "@/components/StudentAvatar";
 
 const links = [
   { to: "/offers", label: "Offers" },
@@ -62,8 +63,8 @@ export default function Navbar() {
                   {unreadCount > 0 && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-violet-300 ring-2 ring-[#111116]" />}
                 </button>
               )}
-              <Link to={user.role === "student" ? "/account" : accountHome} aria-label="Account settings" data-testid="nav-avatar" className="hidden md:flex h-9 w-9 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 items-center justify-center text-sm font-bold">
-                {(user.name || "S")[0].toUpperCase()}
+              <Link to={user.role === "student" ? "/account" : accountHome} aria-label="Account settings" data-testid="nav-avatar" className="hidden md:flex h-9 w-9 items-center justify-center rounded-full">
+                <StudentAvatar avatarKey={user.role === "student" ? user.avatar_key : ""} name={user.name} size={36} />
               </Link>
               <button
                 data-testid="nav-logout-btn"

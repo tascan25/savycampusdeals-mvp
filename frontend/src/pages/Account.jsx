@@ -4,6 +4,7 @@ import { Loader2, LockKeyhole, ShieldCheck, Trash2, UserRound } from "lucide-rea
 import { toast } from "sonner";
 import Navbar from "@/components/Navbar";
 import SiteFooter from "@/components/SiteFooter";
+import StudentAvatar, { STUDENT_AVATARS } from "@/components/StudentAvatar";
 import { useAuth } from "@/context/AuthContext";
 import api, { formatApiError } from "@/lib/api";
 import {
@@ -23,6 +24,7 @@ export default function Account() {
   const [confirmation, setConfirmation] = useState("");
   const [error, setError] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const [savingAvatar, setSavingAvatar] = useState("");
 
   const closeDialog = (nextOpen) => {
     if (deleting) return;
@@ -54,6 +56,20 @@ export default function Account() {
 
   const canDelete = password.length > 0 && confirmation === "DELETE" && !deleting;
 
+  const chooseAvatar = async (avatarKey) => {
+    if (savingAvatar || avatarKey === (user?.avatar_key || "")) return;
+    setSavingAvatar(avatarKey || "initials");
+    try {
+      const { data } = await api.patch("/profile", { avatar_key: avatarKey });
+      setUser(data);
+      toast.success(avatarKey ? "Avatar updated." : "Using your initial again.");
+    } catch (requestError) {
+      toast.error(formatApiError(requestError.response?.data?.detail));
+    } finally {
+      setSavingAvatar("");
+    }
+  };
+
   return (
     <div className="grain min-h-screen overflow-hidden bg-[#050505] text-white">
       <Navbar />
@@ -67,7 +83,7 @@ export default function Account() {
 
         <section className="mt-10 rounded-3xl border border-white/10 bg-white/[0.035] p-6 sm:p-8">
           <div className="flex items-center gap-4">
-            <div className="grid h-12 w-12 place-items-center rounded-2xl bg-indigo-500/15 text-indigo-300"><UserRound size={22} /></div>
+            <StudentAvatar avatarKey={user?.avatar_key} name={user?.name} size={48} />
             <div>
               <h2 className="font-display text-xl font-bold">Profile</h2>
               <p className="text-sm text-zinc-500">Your current Savvy membership details</p>
@@ -86,6 +102,48 @@ export default function Account() {
               </div>
             ))}
           </dl>
+
+          <div className="mt-8 border-t border-white/[0.07] pt-7">
+            <div className="flex items-start gap-3">
+              <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-indigo-500/10 text-indigo-300"><UserRound size={17} /></div>
+              <div>
+                <h3 className="font-display text-lg font-bold">Choose your avatar</h3>
+                <p className="mt-1 text-sm text-zinc-500">Pick a Savvy avatar for your profile. You can change it anytime.</p>
+              </div>
+            </div>
+            <div className="mt-5 grid grid-cols-3 gap-3 sm:grid-cols-5 md:grid-cols-9" data-testid="avatar-options">
+              <button
+                type="button"
+                onClick={() => chooseAvatar("")}
+                aria-label="Use my initial"
+                aria-pressed={!user?.avatar_key}
+                disabled={Boolean(savingAvatar)}
+                className={`group rounded-2xl border p-2.5 transition ${!user?.avatar_key ? "border-indigo-400/70 bg-indigo-500/10 ring-2 ring-indigo-400/15" : "border-white/[0.07] bg-white/[0.02] hover:border-white/20"} disabled:opacity-60`}
+              >
+                <StudentAvatar name={user?.name} size={44} className="mx-auto" />
+                <span className="mt-2 block truncate text-[10px] text-zinc-500">Initial</span>
+              </button>
+              {STUDENT_AVATARS.map((avatar) => {
+                const selected = user?.avatar_key === avatar.key;
+                return (
+                  <button
+                    type="button"
+                    key={avatar.key}
+                    onClick={() => chooseAvatar(avatar.key)}
+                    aria-label={`Choose ${avatar.label}`}
+                    aria-pressed={selected}
+                    disabled={Boolean(savingAvatar)}
+                    data-testid={`avatar-option-${avatar.key}`}
+                    className={`group rounded-2xl border p-2.5 transition ${selected ? "border-indigo-400/70 bg-indigo-500/10 ring-2 ring-indigo-400/15" : "border-white/[0.07] bg-white/[0.02] hover:border-white/20"} disabled:opacity-60`}
+                  >
+                    <StudentAvatar avatarKey={avatar.key} name={user?.name} size={44} className="mx-auto transition-transform group-hover:scale-105" />
+                    <span className="mt-2 block truncate text-[10px] text-zinc-500">{avatar.label.split(" ")[0]}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {savingAvatar && <p className="mt-3 flex items-center gap-2 text-xs text-zinc-500"><Loader2 size={13} className="animate-spin" /> Saving your avatar…</p>}
+          </div>
         </section>
 
         <section className="mt-10 border-t border-white/[0.07] pt-6" data-testid="account-danger-zone">

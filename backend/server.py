@@ -77,6 +77,16 @@ BRAND_OFFER_DISCLAIMER = (
     "brand. SavvyCampusDeals is not affiliated with the brand unless the offer "
     "is marked as a Partner Offer."
 )
+STUDENT_AVATAR_KEYS = {
+    "campus_cat",
+    "cosmic_rocket",
+    "chill_ghost",
+    "study_bird",
+    "music_wave",
+    "game_mode",
+    "green_leaf",
+    "lucky_star",
+}
 # Keep this list deliberately explicit: a domain is trusted only when it appears
 # here.  A non-consumer domain alone is never enough to bypass document review.
 APPROVED_COLLEGE_DOMAINS = {
@@ -477,6 +487,7 @@ def serialize_user(u: dict) -> dict:
         "year": u.get("year", ""),
         "phone": u.get("phone", ""),
         "avatar_url": u.get("avatar_url", ""),
+        "avatar_key": u.get("avatar_key", ""),
         "email_verified": u.get("email_verified", False),
         "verification_status": verification_status,
         "verification_method": "college_email"
@@ -982,6 +993,7 @@ class ProfileUpdateIn(BaseModel):
     year: Optional[str] = None
     phone: Optional[str] = None
     avatar_url: Optional[str] = None
+    avatar_key: Optional[str] = None
 
 
 class DeleteAccountIn(BaseModel):
@@ -1159,6 +1171,7 @@ async def register(body: RegisterIn, response: Response):
         "year": body.year or "",
         "phone": body.phone or "",
         "avatar_url": "",
+        "avatar_key": "",
         "email_verified": False,
         "welcome_email_eligible": True,
         "welcome_email_attempts": 0,
@@ -1646,6 +1659,13 @@ async def reset(body: ResetIn):
 @api.patch("/profile")
 async def update_profile(body: ProfileUpdateIn, user=Depends(get_current_user)):
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if updates.get("avatar_url"):
+        raise HTTPException(400, "Custom avatar images are not supported")
+    if "avatar_key" in updates and updates["avatar_key"] not in {
+        "",
+        *STUDENT_AVATAR_KEYS,
+    }:
+        raise HTTPException(400, "Choose one of the available avatars")
     if updates:
         await db.users.update_one({"_id": user["_id"]}, {"$set": updates})
     fresh = await db.users.find_one({"_id": user["_id"]})
