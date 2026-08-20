@@ -174,6 +174,29 @@ def test_upload_returns_only_secure_url_and_public_id(monkeypatch):
     assert set(result) == {"secure_url", "public_id"}
 
 
+def test_delete_user_verification_prefix_removes_every_page(monkeypatch):
+    monkeypatch.setattr(cloudinary_service, "configure_cloudinary", lambda: None)
+    calls = []
+    responses = iter([{"next_cursor": "page-2"}, {"deleted": {"asset": "deleted"}}])
+    monkeypatch.setattr(
+        cloudinary_service.cloudinary.api,
+        "delete_resources_by_prefix",
+        lambda prefix, **options: calls.append((prefix, options)) or next(responses),
+    )
+    deleted_folders = []
+    monkeypatch.setattr(
+        cloudinary_service.cloudinary.api,
+        "delete_folder",
+        lambda folder: deleted_folders.append(folder),
+    )
+
+    assert cloudinary_service.delete_verification_images_for_user("user-123") is True
+    assert calls[0][0] == "savycampusdeals/verification/user-123/"
+    assert "next_cursor" not in calls[0][1]
+    assert calls[1][1]["next_cursor"] == "page-2"
+    assert deleted_folders == ["savycampusdeals/verification/user-123"]
+
+
 def test_new_manual_submission_stores_urls_and_public_ids(monkeypatch):
     user = manual_user()
     verifications, users = install_fake_db(monkeypatch, user)

@@ -25,6 +25,7 @@ import AdminPortal from "@/pages/AdminPortal";
 import PublicStudentPass from "@/pages/PublicStudentPass";
 import LegalPage from "@/pages/LegalPage";
 import Support from "@/pages/Support";
+import Account from "@/pages/Account";
 import CookieConsent from "@/components/CookieConsent";
 import { AnnouncementProvider } from "@/context/AnnouncementsContext";
 
@@ -54,6 +55,7 @@ export default function App() {
             <Route path="/support" element={<Support />} />
             <Route path="/scan" element={<ProtectedRoute requirePartner><Scan /></ProtectedRoute>} />
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+            <Route path="/account" element={<ProtectedRoute><Account /></ProtectedRoute>} />
             <Route path="/verify" element={<ProtectedRoute><Verify /></ProtectedRoute>} />
             <Route path="/card" element={<ProtectedRoute><StudentCard /></ProtectedRoute>} />
             <Route path="/saved" element={<ProtectedRoute><SavedOffers /></ProtectedRoute>} />

@@ -47,6 +47,7 @@ from services.cloudinary_service import (
     CloudinaryUploadError,
     InvalidVerificationImage,
     delete_verification_image,
+    delete_verification_images_for_user,
     upload_verification_image,
     validate_verification_image,
 )
@@ -775,6 +776,42 @@ def welcome_email_html(user: dict) -> str:
 </html>"""
 
 
+def account_deleted_email_html(user: dict) -> str:
+    """Render the final transactional email after permanent account deletion."""
+    first_name = html.escape(welcome_email_first_name(user))
+    homepage_url = FRONTEND_URL.rstrip("/")
+    support_url = f"{homepage_url}/support"
+    return f"""<!doctype html>
+<html lang="en">
+  <body style="margin:0;background:#050505;color:#ffffff;font-family:Manrope,Arial,sans-serif;">
+    <div style="display:none;max-height:0;overflow:hidden;color:transparent;">Your Savvy Campus account has been permanently deleted.</div>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#050505;padding:28px 12px;">
+      <tr><td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;border:1px solid #27272a;border-radius:28px;overflow:hidden;background:#0b0b0e;">
+          <tr><td style="padding:38px 38px 22px;background:linear-gradient(145deg,#17172a,#111116);">
+            <div style="font-size:12px;letter-spacing:2.4px;color:#a5b4fc;font-weight:800;">SAVVY CAMPUS</div>
+            <h1 style="margin:20px 0 12px;font-family:Outfit,Arial,sans-serif;font-size:40px;line-height:1.08;letter-spacing:-1px;">We&rsquo;re sad to see you go, {first_name}.</h1>
+            <p style="margin:0;color:#c4c4cc;font-size:16px;line-height:1.7;">Your Savvy account has been permanently deleted, along with its associated account data and verification images.</p>
+          </td></tr>
+          <tr><td style="padding:26px 38px 34px;">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #312e81;border-radius:18px;background:#151524;">
+              <tr><td style="padding:20px;color:#d4d4d8;font-size:14px;line-height:1.7;">
+                You will no longer be able to sign in with this account. If you ever want to discover student deals with us again, you&rsquo;re always welcome to create a new account.
+              </td></tr>
+            </table>
+            <a href="{homepage_url}" style="display:block;margin-top:24px;padding:14px 20px;border-radius:999px;background:#ffffff;color:#09090b;text-decoration:none;text-align:center;font-weight:800;">Visit Savvy Campus</a>
+            <p style="margin:22px 0 0;color:#71717a;font-size:13px;line-height:1.6;">Didn&rsquo;t request this deletion or need help? Contact us through <a href="{support_url}" style="color:#a5b4fc;">Savvy Support</a>.</p>
+          </td></tr>
+          <tr><td style="padding:20px 38px;border-top:1px solid #27272a;color:#71717a;font-size:11px;line-height:1.7;">
+            This is the final transactional email for your deleted Savvy Campus account. No action is required.
+          </td></tr>
+        </table>
+      </td></tr>
+    </table>
+  </body>
+</html>"""
+
+
 async def send_welcome_email_once(user: dict) -> dict:
     """Claim and send a signup welcome email once, without blocking verification."""
     if not user.get("welcome_email_eligible") or user.get("welcome_email_sent_at"):
@@ -945,6 +982,11 @@ class ProfileUpdateIn(BaseModel):
     year: Optional[str] = None
     phone: Optional[str] = None
     avatar_url: Optional[str] = None
+
+
+class DeleteAccountIn(BaseModel):
+    password: str = Field(min_length=1, max_length=128)
+    confirmation: str = Field(min_length=1, max_length=20)
 
 
 class VerificationSubmitIn(BaseModel):
@@ -1608,6 +1650,115 @@ async def update_profile(body: ProfileUpdateIn, user=Depends(get_current_user)):
         await db.users.update_one({"_id": user["_id"]}, {"$set": updates})
     fresh = await db.users.find_one({"_id": user["_id"]})
     return serialize_user(fresh)
+
+
+@api.delete("/account")
+async def delete_account(
+    body: DeleteAccountIn,
+    response: Response,
+    user=Depends(get_current_user),
+):
+    """Permanently remove a student and all records owned by that account."""
+    if user.get("role", "student") != "student":
+        raise HTTPException(403, "Only student accounts can be deleted here")
+    if body.confirmation.strip().upper() != "DELETE":
+        raise HTTPException(400, "Type DELETE to confirm account deletion")
+    if not verify_password(body.password, user.get("password_hash", "")):
+        raise HTTPException(401, "Incorrect password")
+
+    user_id = user["_id"]
+    verifications = await db.verifications.find(
+        {"user_id": user_id},
+        {
+            "college_id_image": 1,
+            "selfie_image": 1,
+            "college_id_image_public_id": 1,
+            "selfie_image_public_id": 1,
+        },
+    ).to_list(None)
+    has_cloudinary_assets = any(
+        verification.get("college_id_image_public_id")
+        or verification.get("selfie_image_public_id")
+        or "res.cloudinary.com" in verification.get("college_id_image", "")
+        or "res.cloudinary.com" in verification.get("selfie_image", "")
+        for verification in verifications
+    )
+    if has_cloudinary_assets:
+        cloudinary_deleted = await asyncio.to_thread(
+            delete_verification_images_for_user,
+            str(user_id),
+        )
+        if not cloudinary_deleted:
+            raise HTTPException(
+                503,
+                "We could not securely remove your verification images. Your account was not deleted; please try again.",
+            )
+
+    owned_collections = (
+        db.verifications,
+        db.saved_offers,
+        db.coupons,
+        db.brand_offer_claims,
+        db.savvy_points_transactions,
+        db.savvy_level_rewards,
+        db.announcement_receipts,
+        db.email_campaign_recipients,
+        db.outlet_daily_redemptions,
+        db.offer_monthly_redemptions,
+        db.offer_once_redemptions,
+        db.otp_codes,
+        db.password_resets,
+    )
+
+    async def purge_database_records(session):
+        for collection in owned_collections:
+            await collection.delete_many({"user_id": user_id}, session=session)
+        await db.referrals.delete_many(
+            {
+                "$or": [
+                    {"referrer_id": user_id},
+                    {"referred_id": user_id},
+                ]
+            },
+            session=session,
+        )
+        await db.users.update_many(
+            {"referrer_id": user_id},
+            {"$unset": {"referrer_id": ""}},
+            session=session,
+        )
+        await db.users.delete_one({"_id": user_id}, session=session)
+
+    try:
+        async with await client.start_session() as session:
+            await session.with_transaction(purge_database_records)
+    except Exception:
+        logger.exception("Account data deletion failed for user %s", user_id)
+        raise HTTPException(
+            503,
+            "Account deletion could not be completed. Your database records were kept; please try again.",
+        ) from None
+
+    response.delete_cookie("access_token", path="/")
+    try:
+        email_result = await asyncio.to_thread(
+            send_email,
+            user["email"],
+            f"We’re sad to see you go, {welcome_email_first_name(user)} 💜",
+            account_deleted_email_html(user),
+        )
+    except Exception:
+        logger.exception(
+            "Account deletion confirmation email failed for user %s", user_id
+        )
+        email_result = {"ok": False, "error": "unexpected_delivery_error"}
+    if not email_result["ok"]:
+        logger.warning(
+            "Account deletion confirmation email could not be delivered for user %s: %s",
+            user_id,
+            email_result.get("error"),
+        )
+    return {"ok": True}
 
 
 # -----------------------------

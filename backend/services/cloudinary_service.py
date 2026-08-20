@@ -6,6 +6,7 @@ import re
 from uuid import uuid4
 
 import cloudinary
+import cloudinary.api
 import cloudinary.uploader
 
 _configured = False
@@ -179,6 +180,38 @@ def delete_verification_image(public_id: str) -> bool:
             resource_type="image",
             invalidate=True,
         )
+    except Exception:
+        return False
+    return True
+
+
+def delete_verification_images_for_user(user_identifier: str) -> bool:
+    """Delete every verification asset stored below a user's private prefix."""
+    safe_user_identifier = re.sub(r"[^A-Za-z0-9_-]", "", user_identifier)
+    if not safe_user_identifier:
+        return False
+
+    folder = f"savycampusdeals/verification/{safe_user_identifier}"
+    prefix = f"{folder}/"
+    next_cursor = None
+    try:
+        configure_cloudinary()
+        while True:
+            options = {
+                "resource_type": "image",
+                "invalidate": True,
+            }
+            if next_cursor:
+                options["next_cursor"] = next_cursor
+            result = cloudinary.api.delete_resources_by_prefix(prefix, **options)
+            next_cursor = result.get("next_cursor")
+            if not next_cursor:
+                break
+        try:
+            cloudinary.api.delete_folder(folder)
+        except Exception:
+            # Folder removal is cosmetic; all assets above have been deleted.
+            pass
     except Exception:
         return False
     return True

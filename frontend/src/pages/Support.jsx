@@ -14,7 +14,7 @@ const faqs = [
   ["My verification code did not arrive. What now?", "Check spam and promotions, confirm the email shown on the verification screen, then request a new code after the one-minute cooldown."],
   ["How long does student verification take?", "College-email verification may be instant. Document submissions are normally reviewed within 24 hours, though busy periods can take longer."],
   ["A deal is not working at an outlet.", "Check the offer conditions and expiry first. If it should be valid, email us the offer name, outlet and what happened—never send your password or OTP."],
-  ["How do I request account deletion?", "Email us from your registered address with the subject “Delete my Savvy account.” We may confirm account ownership before processing the request."],
+  ["How do I delete my account?", "While signed in, open Account from your profile icon and use Delete account in the Danger zone. You will need your password and must confirm the permanent deletion."],
 ];
 
 export default function Support() {

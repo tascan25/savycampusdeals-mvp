@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Bell, Menu, X, LogOut } from "lucide-react";
+import { Bell, Menu, X, LogOut, UserRound } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useAnnouncements } from "@/context/AnnouncementsContext";
 
@@ -62,7 +62,7 @@ export default function Navbar() {
                   {unreadCount > 0 && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-violet-300 ring-2 ring-[#111116]" />}
                 </button>
               )}
-              <Link to={accountHome} data-testid="nav-avatar" className="hidden md:flex h-9 w-9 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 items-center justify-center text-sm font-bold">
+              <Link to={user.role === "student" ? "/account" : accountHome} aria-label="Account settings" data-testid="nav-avatar" className="hidden md:flex h-9 w-9 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 items-center justify-center text-sm font-bold">
                 {(user.name || "S")[0].toUpperCase()}
               </Link>
               <button
@@ -98,7 +98,10 @@ export default function Navbar() {
             </>
           )}
           {user && (
-            <button onClick={async () => { await logout(); setOpen(false); nav("/"); }} className="text-left text-zinc-300 py-2 px-2 flex items-center gap-2"><LogOut size={14}/> Logout</button>
+            <>
+              {user.role === "student" && <Link to="/account" onClick={() => setOpen(false)} className="text-zinc-300 py-2 px-2 flex items-center gap-2"><UserRound size={14} /> Account</Link>}
+              <button onClick={async () => { await logout(); setOpen(false); nav("/"); }} className="text-left text-zinc-300 py-2 px-2 flex items-center gap-2"><LogOut size={14}/> Logout</button>
+            </>
           )}
         </div>
       )}

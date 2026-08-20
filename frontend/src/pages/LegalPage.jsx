@@ -95,7 +95,7 @@ const policies = {
       ]],
       ["8. Your choices and rights", [
         "You may ask to access, correct or delete personal data, withdraw consent, raise a grievance or request information about processing, subject to applicable exceptions. You can change optional analytics choices through Cookie settings.",
-        "To make a privacy request, email savycampus@gmail.com from your registered address. We may verify your identity before completing a request and will respond within the period required by applicable law.",
+        "You can permanently delete your account and its associated account data from the Account page. For other privacy requests, email savycampus@gmail.com from your registered address. We may verify your identity before completing a request and will respond within the period required by applicable law.",
       ]],
       ["9. Children", [
         "Savvy is intended for college students. Users under 18 should use the service only with permission from a parent or legal guardian. Contact us if you believe a child has provided information without appropriate permission.",
