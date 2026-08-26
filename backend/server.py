@@ -1037,6 +1037,7 @@ class FreshersCampaignUpdateIn(BaseModel):
     verification_deadline: Optional[datetime] = None
     manual_status: Optional[str] = Field(default=None, max_length=20)
     gog_offer: Optional[str] = Field(default=None, max_length=500)
+    gog_discount_offer: Optional[str] = Field(default=None, max_length=500)
     s_cafe_offer: Optional[str] = Field(default=None, max_length=500)
     big_bite_offer: Optional[str] = Field(default=None, max_length=1000)
     pickup_location: Optional[str] = Field(default=None, max_length=500)
@@ -1243,10 +1244,17 @@ async def _freshers_outlet(cafe: str) -> Optional[dict]:
     return await db.outlets.find_one({"name": {"$regex": pattern, "$options": "i"}})
 
 
-def _freshers_offer(cafe: str, campaign: dict) -> str:
+def _freshers_offer(cafe: str, campaign: dict, position: Optional[int] = None) -> str:
     if cafe == "big_bite":
         return campaign.get("big_bite_offer", "")
     if cafe == "gog":
+        # GOG positions are the odd reward slots from 51 through 199. The first
+        # 30 such students occupy slots 51–109; the other 45 occupy 111–199.
+        if position is not None and position >= 111:
+            return campaign.get(
+                "gog_discount_offer",
+                "15% off on a purchase of ₹350 at GOG Cafe & Bakers.",
+            )
         return campaign.get("gog_offer", "")
     return campaign.get("s_cafe_offer", "")
 
@@ -1312,7 +1320,11 @@ async def unlock_freshers_reward(user: dict) -> Optional[dict]:
                     else "S Cafe"
                 ),
                 "cafe_address": outlet.get("address", "") if outlet else "",
-                "cafe_offer": _freshers_offer(participant["cafe"], campaign),
+                "cafe_offer": _freshers_offer(
+                    participant["cafe"],
+                    campaign,
+                    participant.get("reward_slot") or participant.get("position"),
+                ),
             }
         )
     await db.freshers_participants.update_one(
@@ -1347,7 +1359,11 @@ def serialize_freshers_participant(participant: dict, campaign: dict) -> dict:
         else "S Cafe"
     )
     offer = participant.get("cafe_offer") or (
-        _freshers_offer(participant.get("cafe"), campaign)
+        _freshers_offer(
+            participant.get("cafe"),
+            campaign,
+            participant.get("reward_slot") or participant.get("position"),
+        )
     )
     return {
         "id": str(participant["_id"]),
@@ -1404,7 +1420,11 @@ def freshers_email_html(participant: dict, campaign: dict, *, reservation: bool)
                 else "S Cafe"
             )
             offer = participant.get("cafe_offer") or (
-                _freshers_offer(participant.get("cafe"), campaign)
+                _freshers_offer(
+                    participant.get("cafe"),
+                    campaign,
+                    participant.get("reward_slot") or participant.get("position"),
+                )
             )
             cafe_address = participant.get("cafe_address", "")
             address_line = (
@@ -2708,6 +2728,10 @@ def _freshers_admin_campaign(campaign: dict) -> dict:
         "goodies_limit": FRESHERS_GOODIES_LIMIT,
         "validity_days": FRESHERS_VALIDITY_DAYS,
         "gog_offer": campaign.get("gog_offer", ""),
+        "gog_discount_offer": campaign.get(
+            "gog_discount_offer",
+            "15% off on a purchase of ₹350 at GOG Cafe & Bakers.",
+        ),
         "s_cafe_offer": campaign.get("s_cafe_offer", ""),
         "big_bite_offer": campaign.get("big_bite_offer", ""),
         "pickup_location": campaign.get("pickup_location", ""),
@@ -6702,7 +6726,11 @@ async def scan_lookup(body: ScanIn, scanner=Depends(get_scanner_user)):
             else "S Cafe"
         )
         offer = participant.get("cafe_offer") or (
-            _freshers_offer(participant.get("cafe"), campaign)
+            _freshers_offer(
+                participant.get("cafe"),
+                campaign,
+                participant.get("reward_slot") or participant.get("position"),
+            )
         )
         return {
             "kind": "freshers_cafe",
@@ -7761,6 +7789,7 @@ async def on_startup():
                 "allowed_domain": FRESHERS_DOMAIN,
                 "next_position": 0,
                 "gog_offer": "One free coffee. Limited campaign pool: 30 coffees total.",
+                "gog_discount_offer": "15% off on a purchase of ₹350 at GOG Cafe & Bakers.",
                 "s_cafe_offer": "Buy one pizza and get one free, across every pizza category and size.",
                 "big_bite_offer": "Choose one Freshers offer: Buy 1 Pizza and Get 1 Pizza FREE; or selected Chilli Potato, Noodles, Fried Rice, and Rolls at ₹99 each. Dine-in only; one offer per bill; cannot be combined with another promotion.",
                 "goodies_description": "Savvy stickers and pamphlet",

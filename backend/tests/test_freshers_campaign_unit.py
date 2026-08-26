@@ -23,6 +23,7 @@ def campaign(**overrides):
         "grace_ends_at": datetime(2026, 8, 27, 18, 40, tzinfo=timezone.utc),
         "manual_status": "scheduled",
         "gog_offer": "GOG offer",
+        "gog_discount_offer": "GOG ₹350 discount offer",
         "s_cafe_offer": "S Cafe offer",
         "big_bite_offer": "Big Bite offer",
         "goodies_description": "Savvy stickers and pamphlet",
@@ -69,6 +70,12 @@ def test_reward_tiers_and_alternating_cafes_are_exact():
     assert assignments.count("big_bite") == 50
     assert assignments.count("gog") == 75
     assert assignments.count("s_cafe") == 75
+
+    details = campaign()
+    assert server._freshers_offer("gog", details, 51) == "GOG offer"
+    assert server._freshers_offer("gog", details, 109) == "GOG offer"
+    assert server._freshers_offer("gog", details, 111) == "GOG ₹350 discount offer"
+    assert server._freshers_offer("gog", details, 199) == "GOG ₹350 discount offer"
 
 
 def test_goodies_and_cafe_codes_are_distinct_scanner_types():

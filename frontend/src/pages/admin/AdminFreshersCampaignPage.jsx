@@ -5,7 +5,15 @@ import { toast } from "sonner";
 import api, { formatApiError } from "@/lib/api";
 
 const input = "mt-2 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2.5 text-sm text-white outline-none focus:border-indigo-400";
-const toLocal = (value) => value ? new Date(new Date(value).getTime() - new Date(value).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "";
+const IST_OFFSET_MINUTES = 330;
+const toIndiaInput = (value) => {
+  if (!value) return "";
+  const normalized = /(?:Z|[+-]\d{2}:?\d{2})$/.test(value) ? value : `${value}Z`;
+  const timestamp = new Date(normalized);
+  if (Number.isNaN(timestamp.getTime())) return "";
+  return new Date(timestamp.getTime() + IST_OFFSET_MINUTES * 60000).toISOString().slice(0, 16);
+};
+const indiaInputToIso = (value) => value ? new Date(`${value}:00+05:30`).toISOString() : null;
 
 export default function AdminFreshersCampaignPage() {
   const client = useQueryClient();
@@ -14,8 +22,8 @@ export default function AdminFreshersCampaignPage() {
   const [staff, setStaff] = useState({ name: "", email: "", password: "" });
   const [credentials, setCredentials] = useState([]);
   const campaignData = data.data?.campaign;
-  useEffect(() => { if (campaignData && !form) setForm({ ...campaignData, opens_at: toLocal(campaignData.opens_at), closes_at: toLocal(campaignData.closes_at), verification_deadline: toLocal(campaignData.verification_deadline) }); }, [campaignData, form]);
-  const save = useMutation({ mutationFn: async (values) => (await api.patch("/admin/freshers-campaign", { ...values, opens_at: new Date(values.opens_at).toISOString(), closes_at: new Date(values.closes_at).toISOString(), verification_deadline: values.verification_deadline ? new Date(values.verification_deadline).toISOString() : null })).data, onSuccess: async () => { toast.success("Campaign settings saved"); await client.invalidateQueries({ queryKey: ["admin-freshers"] }); }, onError: (e) => toast.error(formatApiError(e.response?.data?.detail)) });
+  useEffect(() => { if (campaignData && !form) setForm({ ...campaignData, opens_at: toIndiaInput(campaignData.opens_at), closes_at: toIndiaInput(campaignData.closes_at), verification_deadline: toIndiaInput(campaignData.verification_deadline) }); }, [campaignData, form]);
+  const save = useMutation({ mutationFn: async (values) => (await api.patch("/admin/freshers-campaign", { ...values, opens_at: indiaInputToIso(values.opens_at), closes_at: indiaInputToIso(values.closes_at), verification_deadline: indiaInputToIso(values.verification_deadline) })).data, onSuccess: async () => { toast.success("Campaign settings saved"); await client.invalidateQueries({ queryKey: ["admin-freshers"] }); }, onError: (e) => toast.error(formatApiError(e.response?.data?.detail)) });
   const createStaff = useMutation({ mutationFn: async () => (await api.post("/admin/freshers-campaign/staff", staff)).data, onSuccess: async () => { toast.success("Event staff account created"); setStaff({ name: "", email: "", password: "" }); await client.invalidateQueries({ queryKey: ["admin-freshers"] }); }, onError: (e) => toast.error(formatApiError(e.response?.data?.detail)) });
   const staffStatus = useMutation({ mutationFn: async ({ id, active }) => (await api.patch(`/admin/freshers-campaign/staff/${id}/status`, { active })).data, onSuccess: async () => client.invalidateQueries({ queryKey: ["admin-freshers"] }), onError: (e) => toast.error(formatApiError(e.response?.data?.detail)) });
   const bootstrapStaff = useMutation({ mutationFn: async () => (await api.post("/admin/freshers-campaign/bootstrap-staff")).data, onSuccess: async (result) => { setCredentials(result.credentials); toast.success("Four staff accounts created — save the passwords now"); await client.invalidateQueries({ queryKey: ["admin-freshers"] }); }, onError: (e) => toast.error(formatApiError(e.response?.data?.detail)) });
