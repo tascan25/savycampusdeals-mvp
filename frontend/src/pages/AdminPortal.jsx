@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BarChart3, CheckCircle2, ChevronLeft, ChevronRight, CircleUserRound, Clock3,
-  FileText, Handshake, LayoutDashboard, Loader2, LogOut, Mail, Menu, Search, Settings,
+  FileText, Gift, Handshake, LayoutDashboard, Loader2, LogOut, Mail, Menu, Search, Settings,
   Megaphone, ShieldCheck, Store, Ticket, TicketCheck, Trophy, UserRoundPlus, Users, XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -20,6 +20,7 @@ const AdminReferralsPage = lazy(() => import("@/pages/admin/AdminReferralsPage")
 const AdminBrandsOutletsPage = lazy(() => import("@/pages/admin/AdminBrandsOutletsPage"));
 const AdminAnnouncementsPage = lazy(() => import("@/pages/admin/AdminAnnouncementsPage"));
 const AdminEmailCampaignsPage = lazy(() => import("@/pages/admin/AdminEmailCampaignsPage"));
+const AdminFreshersCampaignPage = lazy(() => import("@/pages/admin/AdminFreshersCampaignPage"));
 
 const navItems = [
   { to: "/admin", label: "Dashboard", icon: LayoutDashboard },
@@ -30,6 +31,7 @@ const navItems = [
   { to: "/admin/referrals", label: "Referrals", icon: UserRoundPlus },
   { to: "/admin/announcements", label: "Announcements", icon: Megaphone },
   { to: "/admin/email-campaigns", label: "Email campaigns", icon: Mail },
+  { to: "/admin/freshers-campaign", label: "KIET Freshers", icon: Gift },
   { to: "/admin/brands", label: "Brands & Outlets", icon: Store },
   { to: "/admin/coupons", label: "Coupons", icon: Ticket, placeholder: true },
   { to: "/admin/analytics", label: "Analytics", icon: BarChart3 },
@@ -187,6 +189,7 @@ export default function AdminPortal() {
   else if (pathname.startsWith("/admin/referrals")) page = <Suspense fallback={<div className="min-h-[420px] grid place-items-center"><Loader2 className="animate-spin text-violet-300" /></div>}><AdminReferralsPage openUser={openUser} /></Suspense>;
   else if (pathname.startsWith("/admin/announcements")) page = <Suspense fallback={<div className="min-h-[420px] grid place-items-center"><Loader2 className="animate-spin text-violet-300" /></div>}><AdminAnnouncementsPage /></Suspense>;
   else if (pathname.startsWith("/admin/email-campaigns")) page = <Suspense fallback={<div className="min-h-[420px] grid place-items-center"><Loader2 className="animate-spin text-teal-300" /></div>}><AdminEmailCampaignsPage /></Suspense>;
+  else if (pathname.startsWith("/admin/freshers-campaign")) page = <Suspense fallback={<div className="min-h-[420px] grid place-items-center"><Loader2 className="animate-spin text-indigo-300" /></div>}><AdminFreshersCampaignPage /></Suspense>;
   else if (pathname.startsWith("/admin/brands")) page = <Suspense fallback={<div className="min-h-[420px] grid place-items-center"><Loader2 className="animate-spin text-indigo-300" /></div>}><AdminBrandsOutletsPage /></Suspense>;
   else if (pathname.startsWith("/admin/analytics")) page = <Suspense fallback={<div className="min-h-[420px] grid place-items-center"><Loader2 className="animate-spin text-indigo-300" /></div>}><AdminAnalyticsPage /></Suspense>;
   else { const item = navItems.find((entry) => entry.placeholder && pathname.startsWith(entry.to)); if (item) page = <PlaceholderPage title={item.label} />; }

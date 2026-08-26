@@ -31,6 +31,7 @@ export default function Dashboard() {
     enabled: verified,
   });
   const offers = useQuery({ queryKey: ["dashboard-offers"], queryFn: async () => (await api.get("/offers", { params: { sort: "featured" } })).data });
+  const freshers = useQuery({ queryKey: ["freshers-reward"], queryFn: async () => (await api.get("/freshers/reward")).data, retry: false });
 
   const toggleSave = async (offer) => {
     try {
@@ -70,6 +71,8 @@ export default function Dashboard() {
             <Link to="/verify" data-testid="dashboard-verify-btn" className="rounded-full bg-white text-black font-semibold px-4 py-2 text-sm">{user?.verification_status === "expired" ? "Renew now" : "Verify now"}</Link>
           </motion.div>
         )}
+
+        {freshers.data?.reward && <Link to="/freshers-reward" className="mt-5 flex items-center gap-4 rounded-2xl border border-indigo-400/25 bg-indigo-500/10 p-5 transition-colors hover:bg-indigo-500/15"><Gift className="shrink-0 text-indigo-300"/><div className="flex-1"><div className="font-display font-bold">KIET Freshers position #{freshers.data.reward.position}</div><div className="text-sm text-indigo-100/65">{freshers.data.reward.status === "unlocked" ? "Your event passes are ready." : freshers.data.reward.status === "reserved" ? "Complete verification to unlock your passes." : "View your campaign status."}</div></div><ArrowRight size={17}/></Link>}
 
         <SavvyPointsHub overview={savvyPoints.data} loading={savvyPoints.isLoading} />
 

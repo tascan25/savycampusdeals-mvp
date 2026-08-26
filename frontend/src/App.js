@@ -26,6 +26,8 @@ import PublicStudentPass from "@/pages/PublicStudentPass";
 import LegalPage from "@/pages/LegalPage";
 import Support from "@/pages/Support";
 import Account from "@/pages/Account";
+import FreshersReward from "@/pages/FreshersReward";
+import EventStaffScan from "@/pages/EventStaffScan";
 import CookieConsent from "@/components/CookieConsent";
 import { AnnouncementProvider } from "@/context/AnnouncementsContext";
 
@@ -54,6 +56,8 @@ export default function App() {
             <Route path="/cookies" element={<LegalPage />} />
             <Route path="/support" element={<Support />} />
             <Route path="/scan" element={<ProtectedRoute requirePartner><Scan /></ProtectedRoute>} />
+            <Route path="/event-staff/scan" element={<ProtectedRoute requireEventStaff><EventStaffScan /></ProtectedRoute>} />
+            <Route path="/freshers-reward" element={<ProtectedRoute><FreshersReward /></ProtectedRoute>} />
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="/account" element={<ProtectedRoute><Account /></ProtectedRoute>} />
             <Route path="/verify" element={<ProtectedRoute><Verify /></ProtectedRoute>} />

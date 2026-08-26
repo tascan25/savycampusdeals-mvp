@@ -85,7 +85,7 @@ function ResultCard({ result, onRedeem, onClose, redeeming }) {
     );
   }
 
-  if (result.kind === "coupon") {
+  if (["coupon", "freshers_cafe"].includes(result.kind)) {
     const active = result.status === "active" && !result.expired;
     const studentOk = result.student_verified && !result.student_expiry_expired;
     const initial = (result.student_name || "?")[0].toUpperCase();
@@ -138,6 +138,7 @@ function ResultCard({ result, onRedeem, onClose, redeeming }) {
             </div>
             <div className="text-sm font-semibold truncate" data-testid="scan-coupon-brand">{result.brand}</div>
             <div className="text-xs text-zinc-400 truncate">{result.offer_title}</div>
+            {result.cafe_address && <div className="mt-1 max-w-xs text-[11px] leading-4 text-zinc-500">{result.cafe_address}</div>}
           </div>
           <div className="text-right shrink-0">
             <div className="font-display text-xl font-extrabold">{result.discount}</div>
@@ -176,10 +177,11 @@ export default function Scan() {
   const location = useLocation();
   const urlParams = new URLSearchParams(location.search);
   const urlCode = urlParams.get("c");         // coupon code
+  const urlFreshers = urlParams.get("f");     // KIET Freshers cafe coupon
   const urlReward = urlParams.get("r");       // level reward code
   const urlStudent = urlParams.get("s");      // student number
   const urlPayload = urlParams.get("p");      // raw payload (legacy)
-  const cameFromQrScan = Boolean(urlCode || urlReward || urlStudent || urlPayload);
+  const cameFromQrScan = Boolean(urlCode || urlFreshers || urlReward || urlStudent || urlPayload);
 
   const [mode, setMode] = useState(cameFromQrScan ? "manual" : "camera");
   const [manual, setManual] = useState("");
@@ -203,6 +205,7 @@ export default function Scan() {
       setResult(data);
       if (data.kind === "student") toast.success(data.verified ? "Verified student!" : "Not verified");
       if (data.kind === "coupon") toast.success("Coupon found");
+      if (data.kind === "freshers_cafe") toast.success("KIET Freshers café coupon found");
       if (data.kind === "level_reward") toast.success("Level reward found");
     } catch (e) {
       const msg = formatApiError(e.response?.data?.detail);
@@ -214,7 +217,7 @@ export default function Scan() {
   // Auto-lookup when the user lands here from a QR-code URL scanned by their phone camera.
   useEffect(() => {
     if (autoLookupRef.current) return;
-    const value = urlCode || urlReward || urlStudent || urlPayload;
+    const value = urlCode || urlFreshers || urlReward || urlStudent || urlPayload;
     if (value) {
       autoLookupRef.current = true;
       lookup(value);
@@ -275,11 +278,11 @@ export default function Scan() {
   };
 
   const onRedeem = async () => {
-    if (!result || !["coupon", "level_reward"].includes(result.kind)) return;
+    if (!result || !["coupon", "level_reward", "freshers_cafe"].includes(result.kind)) return;
     setRedeeming(true);
     try {
       const { data } = await api.post("/scan/redeem", { payload: result.code });
-      toast.success(data.kind === "level_reward" ? `${data.tier_name} reward redeemed for ${data.student_name}` : `Redeemed ${data.brand} coupon for ${data.student_name}`);
+      toast.success(data.kind === "level_reward" ? `${data.tier_name} reward redeemed for ${data.student_name}` : `Coupon redeemed for ${data.student_name}`);
       setResult({ ...result, status: "redeemed", redeemed_at: data.redeemed_at });
     } catch (e) {
       toast.error(formatApiError(e.response?.data?.detail));

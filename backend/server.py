@@ -523,7 +523,7 @@ async def get_current_user(request: Request) -> dict:
     user = await db.users.find_one({"_id": ObjectId(payload["sub"])})
     if not user:
         raise HTTPException(401, "User not found")
-    if user.get("role") == "outlet_partner" and not user.get("active", True):
+    if user.get("role") in {"outlet_partner", "event_staff"} and not user.get("active", True):
         raise HTTPException(403, "This outlet partner account is disabled")
     user = await expire_verification_if_needed(user)
     return user
@@ -1031,6 +1031,29 @@ class AdminPartnerStatusIn(BaseModel):
     active: bool
 
 
+class FreshersCampaignUpdateIn(BaseModel):
+    opens_at: Optional[datetime] = None
+    closes_at: Optional[datetime] = None
+    verification_deadline: Optional[datetime] = None
+    manual_status: Optional[str] = Field(default=None, max_length=20)
+    gog_offer: Optional[str] = Field(default=None, max_length=500)
+    s_cafe_offer: Optional[str] = Field(default=None, max_length=500)
+    big_bite_offer: Optional[str] = Field(default=None, max_length=1000)
+    pickup_location: Optional[str] = Field(default=None, max_length=500)
+    goodies_description: Optional[str] = Field(default=None, max_length=300)
+    rewards_enabled: Optional[bool] = None
+
+
+class FreshersStaffCreateIn(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
+
+
+class FreshersScanIn(BaseModel):
+    payload: str = Field(min_length=4, max_length=1000)
+
+
 class AdminAnnouncementIn(BaseModel):
     title: str = Field(min_length=2, max_length=100)
     message: str = Field(min_length=2, max_length=600)
@@ -1085,6 +1108,432 @@ class OtpResendIn(BaseModel):
 
 class EmailChangeIn(BaseModel):
     email: EmailStr
+
+
+# -----------------------------
+# KIET Freshers 2026 campaign
+# -----------------------------
+FRESHERS_CAMPAIGN_SLUG = "kiet-freshers-2026"
+FRESHERS_DOMAIN = "kiet.edu"
+FRESHERS_COUPON_LIMIT = 200
+FRESHERS_GOODIES_LIMIT = 400
+FRESHERS_VALIDITY_DAYS = 7
+FRESHERS_GRACE_MINUTES = 10
+_freshers_worker_task: Optional[asyncio.Task] = None
+
+
+def freshers_campaign_status(campaign: dict, now: Optional[datetime] = None) -> str:
+    now = now or datetime.now(timezone.utc)
+    manual = campaign.get("manual_status", "scheduled")
+    if manual in {"paused", "closed"}:
+        return manual
+    if now < _aware(campaign["opens_at"]):
+        return "scheduled"
+    if now <= _aware(campaign["closes_at"]):
+        return "live"
+    if now <= _aware(campaign["grace_ends_at"]):
+        return "grace"
+    return "closed"
+
+
+async def get_freshers_campaign() -> Optional[dict]:
+    collection = getattr(db, "freshers_campaigns", None)
+    if collection is None:
+        return None
+    return await collection.find_one({"slug": FRESHERS_CAMPAIGN_SLUG})
+
+
+def freshers_tier(position: int) -> str:
+    if position <= FRESHERS_COUPON_LIMIT:
+        return "cafe_and_goodies"
+    if position <= FRESHERS_GOODIES_LIMIT:
+        return "goodies"
+    return "waitlist"
+
+
+def freshers_cafe(position: int) -> Optional[str]:
+    if position > FRESHERS_COUPON_LIMIT:
+        return None
+    if position <= 50:
+        return "big_bite"
+    # Continue alternating GOG/S Cafe for every remaining coupon position.
+    return "gog" if position % 2 else "s_cafe"
+
+
+def _freshers_code(prefix: str) -> str:
+    return f"{prefix}-{secrets.token_urlsafe(12).replace('_', '').replace('-', '').upper()}"
+
+
+async def enroll_freshers_student(user: dict) -> Optional[dict]:
+    """Reserve a race-safe campaign position after signup OTP verification."""
+    campaign = await get_freshers_campaign()
+    if not campaign or freshers_campaign_status(campaign) not in {"live", "grace"}:
+        return None
+    now = datetime.now(timezone.utc)
+    created_at = _aware(user.get("created_at"))
+    email_domain = user.get("email", "").rsplit("@", 1)[-1].lower()
+    if (
+        email_domain != FRESHERS_DOMAIN
+        or not created_at
+        or created_at < _aware(campaign["opens_at"])
+        or created_at > _aware(campaign["closes_at"])
+        or now > _aware(campaign["grace_ends_at"])
+    ):
+        return None
+    existing = await db.freshers_participants.find_one(
+        {"campaign_id": campaign["_id"], "user_id": user["_id"]}
+    )
+    if existing:
+        return existing
+
+    # The unique user index makes retries idempotent. A rare failed insert may
+    # leave a harmless position gap, but can never over-allocate a reward slot.
+    sequenced = await db.freshers_campaigns.find_one_and_update(
+        {"_id": campaign["_id"], "manual_status": {"$ne": "paused"}},
+        {"$inc": {"next_position": 1}},
+        return_document=ReturnDocument.AFTER,
+    )
+    if not sequenced:
+        return None
+    position = int(sequenced.get("next_position", 0))
+    participant = {
+        "campaign_id": campaign["_id"],
+        "user_id": user["_id"],
+        "email": user["email"],
+        "name": user.get("name", ""),
+        "position": position,
+        "reward_slot": position if position <= FRESHERS_GOODIES_LIMIT else None,
+        "tier": freshers_tier(position),
+        "cafe": freshers_cafe(position),
+        "status": "reserved" if position <= FRESHERS_GOODIES_LIMIT else "waitlisted",
+        "otp_verified_at": now,
+        "created_at": now,
+        "updated_at": now,
+    }
+    try:
+        result = await db.freshers_participants.insert_one(participant)
+        participant["_id"] = result.inserted_id
+    except DuplicateKeyError:
+        return await db.freshers_participants.find_one(
+            {"campaign_id": campaign["_id"], "user_id": user["_id"]}
+        )
+    await db.freshers_email_jobs.update_one(
+        {"participant_id": participant["_id"], "kind": "reservation"},
+        {
+            "$setOnInsert": {
+                "participant_id": participant["_id"],
+                "kind": "reservation",
+                "status": "pending",
+                "deliver_at": now + timedelta(minutes=5),
+                "created_at": now,
+                "attempts": 0,
+            }
+        },
+        upsert=True,
+    )
+    return participant
+
+
+async def _freshers_outlet(cafe: str) -> Optional[dict]:
+    pattern = {
+        "gog": r"^GOG Cafe",
+        "s_cafe": r"^S Cafe$",
+        "big_bite": r"^The Big Bite Co\.$",
+    }.get(cafe, r"a^")
+    return await db.outlets.find_one({"name": {"$regex": pattern, "$options": "i"}})
+
+
+def _freshers_offer(cafe: str, campaign: dict) -> str:
+    if cafe == "big_bite":
+        return campaign.get("big_bite_offer", "")
+    if cafe == "gog":
+        return campaign.get("gog_offer", "")
+    return campaign.get("s_cafe_offer", "")
+
+
+async def unlock_freshers_reward(user: dict) -> Optional[dict]:
+    """Issue passes once a reserved KIET student completes full verification."""
+    if effective_verification_status(user) != "approved":
+        return None
+    campaign = await get_freshers_campaign()
+    participants = getattr(db, "freshers_participants", None)
+    if not campaign or participants is None:
+        return None
+    participant = await participants.find_one(
+        {"campaign_id": campaign["_id"], "user_id": user["_id"]}
+    )
+    if not participant:
+        return None
+    if not campaign.get("rewards_enabled", False):
+        await db.freshers_participants.update_one(
+            {"_id": participant["_id"]},
+            {"$set": {"full_verification_at": datetime.now(timezone.utc), "updated_at": datetime.now(timezone.utc)}},
+        )
+        return await db.freshers_participants.find_one({"_id": participant["_id"]})
+    if participant.get("status") == "waitlisted":
+        await db.freshers_participants.update_one(
+            {"_id": participant["_id"], "status": "waitlisted"},
+            {"$set": {"full_verification_at": datetime.now(timezone.utc), "updated_at": datetime.now(timezone.utc)}},
+        )
+        return await db.freshers_participants.find_one({"_id": participant["_id"]})
+    if participant.get("status") not in {"reserved", "promoted"}:
+        return participant
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(days=FRESHERS_VALIDITY_DAYS)
+    goodies_code = participant.get("goodies_code") or _freshers_code("KFG")
+    cafe_code = participant.get("cafe_code")
+    outlet = None
+    if participant.get("tier") == "cafe_and_goodies":
+        cafe_code = cafe_code or _freshers_code("KFC")
+        outlet = await _freshers_outlet(participant["cafe"])
+    updates = {
+        "status": "unlocked",
+        "full_verification_at": now,
+        "passes_issued_at": now,
+        "expires_at": expires_at,
+        "goodies_code": goodies_code,
+        "goodies_qr_data_uri": generate_qr_data_uri(
+            f"{FRONTEND_URL.rstrip('/')}/event-staff/scan?g={goodies_code}"
+        ),
+        "goodies_status": "active",
+        "updated_at": now,
+    }
+    if cafe_code:
+        updates.update(
+            {
+                "cafe_code": cafe_code,
+                "cafe_qr_data_uri": generate_qr_data_uri(
+                    f"{FRONTEND_URL.rstrip('/')}/scan?f={cafe_code}"
+                ),
+                "cafe_status": "active",
+                "cafe_outlet_id": outlet.get("_id") if outlet else None,
+                "cafe_name": "GOG Cafe & Bakers" if participant["cafe"] == "gog" else outlet.get("name", "") if outlet else (
+                    "The Big Bite Co." if participant["cafe"] == "big_bite"
+                    else "S Cafe"
+                ),
+                "cafe_address": outlet.get("address", "") if outlet else "",
+                "cafe_offer": _freshers_offer(participant["cafe"], campaign),
+            }
+        )
+    await db.freshers_participants.update_one(
+        {"_id": participant["_id"], "status": {"$in": ["reserved", "promoted"]}},
+        {"$set": updates},
+    )
+    fresh = await db.freshers_participants.find_one({"_id": participant["_id"]})
+    await db.freshers_email_jobs.update_one(
+        {"participant_id": participant["_id"], "kind": "reward"},
+        {
+            "$setOnInsert": {
+                "participant_id": participant["_id"],
+                "kind": "reward",
+                "status": "pending",
+                "deliver_at": max(
+                    now,
+                    _aware(participant.get("otp_verified_at")) + timedelta(minutes=5),
+                ),
+                "created_at": now,
+                "attempts": 0,
+            }
+        },
+        upsert=True,
+    )
+    return fresh
+
+
+def serialize_freshers_participant(participant: dict, campaign: dict) -> dict:
+    cafe_name = participant.get("cafe_name") or (
+        "The Big Bite Co." if participant.get("cafe") == "big_bite"
+        else "GOG Cafe & Bakers" if participant.get("cafe") == "gog"
+        else "S Cafe"
+    )
+    offer = participant.get("cafe_offer") or (
+        _freshers_offer(participant.get("cafe"), campaign)
+    )
+    return {
+        "id": str(participant["_id"]),
+        "position": participant.get("position"),
+        "reward_slot": participant.get("reward_slot"),
+        "tier": participant.get("tier"),
+        "status": participant.get("status"),
+        "cafe": participant.get("cafe"),
+        "cafe_name": cafe_name if participant.get("cafe") else None,
+        "cafe_address": participant.get("cafe_address", "") if participant.get("cafe") else None,
+        "offer": offer if participant.get("cafe") else None,
+        "goodies_description": campaign.get("goodies_description", "Savvy stickers and pamphlet"),
+        "rewards_enabled": campaign.get("rewards_enabled", False),
+        "pickup_location": campaign.get("pickup_location", ""),
+        "expires_at": _admin_datetime(participant.get("expires_at")),
+        "goodies_code": participant.get("goodies_code"),
+        "goodies_qr_data_uri": participant.get("goodies_qr_data_uri", ""),
+        "goodies_status": participant.get("goodies_status"),
+        "goodies_collected_at": _admin_datetime(participant.get("goodies_collected_at")),
+        "cafe_code": participant.get("cafe_code"),
+        "cafe_qr_data_uri": participant.get("cafe_qr_data_uri", ""),
+        "cafe_status": participant.get("cafe_status"),
+        "cafe_redeemed_at": _admin_datetime(participant.get("cafe_redeemed_at")),
+    }
+
+
+def freshers_email_html(participant: dict, campaign: dict, *, reservation: bool) -> str:
+    first_name = html.escape((participant.get("name") or "Student").split()[0])
+    position = participant.get("position")
+    if reservation and participant.get("status") == "waitlisted":
+        heading = "You’re on the Freshers rewards waitlist"
+        body = "Your KIET registration is confirmed. Complete student verification and we’ll automatically notify you if an earlier reward reservation opens up."
+        qr_block = ""
+    elif reservation and participant.get("status") != "unlocked":
+        heading = f"Reward position #{position} is reserved"
+        body = (
+            "Your verification is complete and your reward is secured. Your QR passes are being prepared and will appear in your Savvy account shortly."
+            if participant.get("full_verification_at")
+            else "Complete the full Savvy student-verification flow to unlock your event passes. Your reservation is currently held for you."
+        )
+        qr_block = ""
+    elif participant.get("status") == "missed":
+        heading = "Welcome to Savvy — you just missed the first 400"
+        body = "The limited KIET Freshers rewards have now been claimed, but your Savvy account is ready for student deals across campus."
+        qr_block = ""
+    else:
+        heading = f"Congratulations — you registered at #{position}"
+        body = "Your KIET Freshers reward is unlocked. Keep these passes private and show each one only to the correct staff member."
+        blocks = []
+        if participant.get("cafe_code"):
+            cafe_name = participant.get("cafe_name") or (
+                "The Big Bite Co." if participant.get("cafe") == "big_bite"
+                else "GOG Cafe & Bakers" if participant.get("cafe") == "gog"
+                else "S Cafe"
+            )
+            offer = participant.get("cafe_offer") or (
+                _freshers_offer(participant.get("cafe"), campaign)
+            )
+            cafe_address = participant.get("cafe_address", "")
+            address_line = (
+                f'<p style="color:#52525b"><b>Address:</b> {html.escape(cafe_address)}</p>'
+                if cafe_address
+                else ""
+            )
+            blocks.append(f'<div style="margin-top:22px;padding:20px;background:#fff;color:#111;border-radius:18px;text-align:center"><b>{html.escape(cafe_name)} coupon</b><p>{html.escape(offer)}</p>{address_line}<img src="cid:freshers-cafe-qr" width="190" alt="Cafe coupon QR" /><p style="font-family:monospace">{html.escape(participant["cafe_code"])}</p></div>')
+        pickup = campaign.get("pickup_location") or "Pickup details will be shared in your Savvy account."
+        blocks.append(f'<div style="margin-top:22px;padding:20px;background:#fff;color:#111;border-radius:18px;text-align:center"><b>Goodies pickup pass</b><p>{html.escape(campaign.get("goodies_description", "Savvy stickers and pamphlet"))}</p><p style="color:#52525b">{html.escape(pickup)}</p><img src="cid:freshers-goodies-qr" width="190" alt="Goodies pickup QR" /><p style="font-family:monospace">{html.escape(participant["goodies_code"])}</p></div>')
+        qr_block = "".join(blocks)
+    expiry = _aware(participant.get("expires_at"))
+    expiry_text = expiry.astimezone(INDIA_TIMEZONE).strftime("%d %B %Y, %I:%M %p IST") if expiry else ""
+    return f'''<!doctype html><html><body style="margin:0;background:#050505;color:#fff;font-family:Arial,sans-serif"><div style="max-width:620px;margin:auto;padding:36px 18px"><div style="padding:32px;border:1px solid #4f46e5;border-radius:24px;background:#111126"><div style="color:#a5b4fc;font-size:12px;letter-spacing:2px">KIET FRESHERS 2026</div><h1>{heading}</h1><p>Hey {first_name},</p><p style="color:#d4d4d8;line-height:1.7">{body}</p>{qr_block}{f'<p style="margin-top:20px;color:#a1a1aa">Both passes expire on {expiry_text} and can be used once.</p>' if expiry_text else ''}<a href="{FRONTEND_URL.rstrip('/')}/freshers-reward" style="display:inline-block;margin-top:22px;padding:13px 20px;background:#a5b4fc;color:#111;border-radius:999px;text-decoration:none;font-weight:bold">View in Savvy</a></div></div></body></html>'''
+
+
+async def _send_freshers_job(job: dict) -> None:
+    participant = await db.freshers_participants.find_one({"_id": job["participant_id"]})
+    campaign = await get_freshers_campaign()
+    if not participant or not campaign:
+        outcome = {"ok": False, "error": "campaign_record_missing"}
+    else:
+        reservation = job["kind"] == "reservation"
+        # Avoid a weaker reservation email after the reward has already unlocked.
+        if reservation and (
+            participant.get("reward_email_sent_at")
+            or participant.get("status") == "unlocked"
+        ):
+            outcome = {"ok": True, "error": None}
+        else:
+            attachments = []
+            if not reservation and participant.get("goodies_qr_data_uri"):
+                attachments.append({"content": participant["goodies_qr_data_uri"].split(",", 1)[1], "filename": "goodies-pass.png", "content_id": "freshers-goodies-qr"})
+            if not reservation and participant.get("cafe_qr_data_uri"):
+                attachments.append({"content": participant["cafe_qr_data_uri"].split(",", 1)[1], "filename": "cafe-coupon.png", "content_id": "freshers-cafe-qr"})
+            subject = f"KIET Freshers: your position is #{participant.get('position')}"
+            outcome = await asyncio.to_thread(send_email, participant["email"], subject, freshers_email_html(participant, campaign, reservation=reservation), attachments)
+    now = datetime.now(timezone.utc)
+    await db.freshers_email_jobs.update_one(
+        {"_id": job["_id"]},
+        {"$set": {"status": "sent" if outcome["ok"] else "failed", "sent_at": now if outcome["ok"] else None, "error": outcome.get("error") or ""}, "$inc": {"attempts": 1}},
+    )
+    if participant and outcome["ok"]:
+        field = "reservation_email_sent_at" if job["kind"] == "reservation" else "reward_email_sent_at"
+        await db.freshers_participants.update_one({"_id": participant["_id"]}, {"$set": {field: now}})
+
+
+async def _queue_freshers_outcome(participant_id: ObjectId, kind: str = "reward") -> None:
+    now = datetime.now(timezone.utc)
+    await db.freshers_email_jobs.update_one(
+        {"participant_id": participant_id, "kind": kind},
+        {"$setOnInsert": {"participant_id": participant_id, "kind": kind, "status": "pending", "deliver_at": now, "created_at": now, "attempts": 0}},
+        upsert=True,
+    )
+
+
+async def finalize_freshers_waitlist() -> None:
+    campaign = await get_freshers_campaign()
+    now = datetime.now(timezone.utc)
+    verification_deadline = _aware(campaign.get("verification_deadline")) if campaign else None
+    if (
+        not campaign
+        or campaign.get("finalized_at")
+        or not verification_deadline
+        or now <= verification_deadline
+    ):
+        return
+    locked = await db.freshers_campaigns.update_one(
+        {"_id": campaign["_id"], "finalized_at": {"$exists": False}, "finalizing_at": {"$exists": False}},
+        {"$set": {"finalizing_at": now}},
+    )
+    if not locked.matched_count:
+        return
+    base = {"campaign_id": campaign["_id"]}
+    expired = await db.freshers_participants.find(
+        {**base, "reward_slot": {"$lte": FRESHERS_GOODIES_LIMIT}, "status": "reserved"}
+    ).sort("reward_slot", 1).to_list(FRESHERS_GOODIES_LIMIT)
+    vacant_slots = [item["reward_slot"] for item in expired]
+    for item in expired:
+        await db.freshers_participants.update_one(
+            {"_id": item["_id"], "status": "reserved"},
+            {"$set": {"status": "missed", "reward_slot": None, "tier": "missed", "updated_at": now}},
+        )
+        await _queue_freshers_outcome(item["_id"])
+    waitlisted = await db.freshers_participants.find(
+        {**base, "status": "waitlisted", "full_verification_at": {"$exists": True}}
+    ).sort("position", 1).to_list(len(vacant_slots))
+    for participant, slot in zip(waitlisted, vacant_slots):
+        await db.freshers_participants.update_one(
+            {"_id": participant["_id"], "status": "waitlisted"},
+            {"$set": {"status": "promoted", "reward_slot": slot, "tier": freshers_tier(slot), "cafe": freshers_cafe(slot), "promoted_at": now, "updated_at": now}},
+        )
+        user = await db.users.find_one({"_id": participant["user_id"]})
+        if user:
+            await unlock_freshers_reward(user)
+    remaining = await db.freshers_participants.find({**base, "status": "waitlisted"}, {"_id": 1}).to_list(None)
+    if remaining:
+        ids = [item["_id"] for item in remaining]
+        await db.freshers_participants.update_many(
+            {"_id": {"$in": ids}, "status": "waitlisted"},
+            {"$set": {"status": "missed", "tier": "missed", "updated_at": now}},
+        )
+        for participant_id in ids:
+            await _queue_freshers_outcome(participant_id)
+    await db.freshers_campaigns.update_one(
+        {"_id": campaign["_id"], "finalizing_at": now},
+        {"$set": {"finalized_at": datetime.now(timezone.utc)}, "$unset": {"finalizing_at": ""}},
+    )
+
+
+async def _freshers_job_worker() -> None:
+    while True:
+        try:
+            await finalize_freshers_waitlist()
+            now = datetime.now(timezone.utc)
+            job = await db.freshers_email_jobs.find_one_and_update(
+                {"status": {"$in": ["pending", "failed"]}, "deliver_at": {"$lte": now}, "attempts": {"$lt": 4}},
+                {"$set": {"status": "sending", "attempted_at": now}},
+                sort=[("deliver_at", 1)],
+                return_document=ReturnDocument.AFTER,
+            )
+            if job:
+                await _send_freshers_job(job)
+                continue
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Freshers campaign worker failed")
+        await asyncio.sleep(10)
 
 
 # -----------------------------
@@ -1432,11 +1881,13 @@ async def verify_otp(body: OtpVerifyIn):
         raise HTTPException(404, "No account with that email")
     if user.get("email_verified"):
         welcome_result = await send_welcome_email_once(user)
+        freshers_entry = await enroll_freshers_student(user)
         return {
             "ok": True,
             "already_verified": True,
             "user": serialize_user(user),
             "welcome_email_sent": welcome_result["ok"],
+            "freshers_position": freshers_entry.get("position") if freshers_entry else None,
         }
     doc = await db.otp_codes.find_one(
         {"user_id": user["_id"], "used": False},
@@ -1473,10 +1924,16 @@ async def verify_otp(body: OtpVerifyIn):
         if doc.get("purpose", "signup") == "signup"
         else {"ok": True, "skipped": True, "error": None}
     )
+    freshers_entry = (
+        await enroll_freshers_student(fresh)
+        if doc.get("purpose", "signup") == "signup"
+        else None
+    )
     return {
         "ok": True,
         "user": serialize_user(fresh),
         "welcome_email_sent": welcome_result["ok"],
+        "freshers_position": freshers_entry.get("position") if freshers_entry else None,
     }
 
 
@@ -1513,6 +1970,7 @@ async def verify_email(token: str):
         {"$set": {"email_verified": True}, "$unset": {"email_verify_token": ""}},
     )
     fresh = await db.users.find_one({"_id": user["_id"]})
+    await enroll_freshers_student(fresh)
     welcome_result = await send_welcome_email_once(fresh)
     return {
         "ok": True,
@@ -2031,10 +2489,14 @@ async def submit_verification(
         )
 
     fresh = await db.users.find_one({"_id": user["_id"]})
+    freshers_reward = await unlock_freshers_reward(fresh) if trusted_email else None
     return {
         "ok": True,
         "verification_method": "college_email" if trusted_email else "document_review",
         "user": serialize_user(fresh),
+        "freshers_reward_unlocked": bool(
+            freshers_reward and freshers_reward.get("status") == "unlocked"
+        ),
     }
 
 
@@ -2079,6 +2541,15 @@ async def get_scanner_user(request: Request) -> dict:
         {"_id": user["outlet_id"]}, {"_id": 1}
     ):
         raise HTTPException(403, "The assigned outlet is no longer available")
+    return user
+
+
+async def get_event_staff_user(request: Request) -> dict:
+    user = await get_current_user(request)
+    if user.get("role") not in {"admin", "event_staff"}:
+        raise HTTPException(403, "Event staff access required")
+    if user.get("role") == "event_staff" and user.get("campaign_slug") != FRESHERS_CAMPAIGN_SLUG:
+        raise HTTPException(403, "This staff account is not assigned to this event")
     return user
 
 
@@ -2199,6 +2670,348 @@ async def admin_set_partner_status(
         raise HTTPException(404, "Partner account not found")
     partner = await db.users.find_one({"_id": partner_oid})
     return {"partner": serialize_admin_partner(partner)}
+
+
+@api.get("/freshers/reward")
+async def my_freshers_reward(user=Depends(get_current_user)):
+    campaign = await get_freshers_campaign()
+    if not campaign:
+        raise HTTPException(404, "Freshers campaign not found")
+    participant = await db.freshers_participants.find_one(
+        {"campaign_id": campaign["_id"], "user_id": user["_id"]}
+    )
+    if not participant:
+        raise HTTPException(404, "You are not registered for this campaign")
+    return {
+        "campaign": {
+            "name": campaign.get("name", "KIET Freshers 2026"),
+            "status": freshers_campaign_status(campaign),
+            "closes_at": _admin_datetime(campaign.get("closes_at")),
+        },
+        "reward": serialize_freshers_participant(participant, campaign),
+    }
+
+
+def _freshers_admin_campaign(campaign: dict) -> dict:
+    return {
+        "id": str(campaign["_id"]),
+        "slug": campaign["slug"],
+        "name": campaign.get("name", "KIET Freshers 2026"),
+        "status": freshers_campaign_status(campaign),
+        "manual_status": campaign.get("manual_status", "scheduled"),
+        "opens_at": _admin_datetime(campaign.get("opens_at")),
+        "closes_at": _admin_datetime(campaign.get("closes_at")),
+        "grace_ends_at": _admin_datetime(campaign.get("grace_ends_at")),
+        "verification_deadline": _admin_datetime(campaign.get("verification_deadline")),
+        "allowed_domain": FRESHERS_DOMAIN,
+        "coupon_limit": FRESHERS_COUPON_LIMIT,
+        "goodies_limit": FRESHERS_GOODIES_LIMIT,
+        "validity_days": FRESHERS_VALIDITY_DAYS,
+        "gog_offer": campaign.get("gog_offer", ""),
+        "s_cafe_offer": campaign.get("s_cafe_offer", ""),
+        "big_bite_offer": campaign.get("big_bite_offer", ""),
+        "pickup_location": campaign.get("pickup_location", ""),
+        "goodies_description": campaign.get("goodies_description", "Savvy stickers and pamphlet"),
+        "rewards_enabled": campaign.get("rewards_enabled", False),
+    }
+
+
+@api.get("/admin/freshers-campaign")
+async def admin_freshers_campaign(admin=Depends(get_admin_user)):
+    campaign = await get_freshers_campaign()
+    if not campaign:
+        raise HTTPException(404, "Freshers campaign not found")
+    base = {"campaign_id": campaign["_id"]}
+    (
+        total,
+        reserved,
+        waitlisted,
+        unlocked,
+        goodies_collected,
+        cafe_redeemed,
+        email_pending,
+        email_sent,
+        email_failed,
+        duplicate_scans,
+    ) = await asyncio.gather(
+        db.freshers_participants.count_documents(base),
+        db.freshers_participants.count_documents({**base, "reward_slot": {"$lte": FRESHERS_GOODIES_LIMIT}}),
+        db.freshers_participants.count_documents({**base, "tier": "waitlist"}),
+        db.freshers_participants.count_documents({**base, "status": "unlocked"}),
+        db.freshers_participants.count_documents({**base, "goodies_status": "collected"}),
+        db.freshers_participants.count_documents({**base, "cafe_status": "redeemed"}),
+        db.freshers_email_jobs.count_documents({"status": {"$in": ["pending", "sending"]}}),
+        db.freshers_email_jobs.count_documents({"status": "sent"}),
+        db.freshers_email_jobs.count_documents({"status": "failed"}),
+        db.freshers_scan_events.count_documents({**base, "result": "duplicate"}),
+    )
+    recent_docs = await db.freshers_participants.find(base).sort("updated_at", -1).to_list(40)
+    activity_docs = await db.freshers_scan_events.find(base).sort("created_at", -1).to_list(30)
+    activity_participants = await db.freshers_participants.find(
+        {"_id": {"$in": list({item["participant_id"] for item in activity_docs})}}
+    ).to_list(30) if activity_docs else []
+    activity_staff = await db.users.find(
+        {"_id": {"$in": list({item["staff_id"] for item in activity_docs})}},
+        {"name": 1},
+    ).to_list(30) if activity_docs else []
+    activity_participant_by_id = {item["_id"]: item for item in activity_participants}
+    activity_staff_by_id = {item["_id"]: item for item in activity_staff}
+    staff_docs = await db.users.find(
+        {"role": "event_staff", "campaign_slug": FRESHERS_CAMPAIGN_SLUG},
+        {"password_hash": 0},
+    ).sort("name", 1).to_list(20)
+    return {
+        "campaign": _freshers_admin_campaign(campaign),
+        "stats": {
+            "registrations": total,
+            "reward_reservations": min(reserved, FRESHERS_GOODIES_LIMIT),
+            "coupon_reservations": await db.freshers_participants.count_documents(
+                {**base, "reward_slot": {"$lte": FRESHERS_COUPON_LIMIT}}
+            ),
+            "waitlisted": waitlisted,
+            "unlocked": unlocked,
+            "goodies_collected": goodies_collected,
+            "goodies_remaining": max(0, FRESHERS_GOODIES_LIMIT - goodies_collected),
+            "cafe_redeemed": cafe_redeemed,
+            "email_pending": email_pending,
+            "email_sent": email_sent,
+            "email_failures": email_failed,
+            "duplicate_scans": duplicate_scans,
+        },
+        "recent": [
+            {
+                **serialize_freshers_participant(item, campaign),
+                "name": item.get("name", ""),
+                "email": item.get("email", ""),
+                "updated_at": _admin_datetime(item.get("updated_at")),
+            }
+            for item in recent_docs
+        ],
+        "activity": [
+            {
+                "id": str(item["_id"]),
+                "kind": item.get("kind", ""),
+                "result": item.get("result", ""),
+                "created_at": _admin_datetime(item.get("created_at")),
+                "student_name": activity_participant_by_id.get(item.get("participant_id"), {}).get("name", ""),
+                "position": activity_participant_by_id.get(item.get("participant_id"), {}).get("position"),
+                "staff_name": activity_staff_by_id.get(item.get("staff_id"), {}).get("name", ""),
+            }
+            for item in activity_docs
+        ],
+        "staff": [
+            {
+                "id": str(item["_id"]),
+                "name": item.get("name", ""),
+                "email": item.get("email", ""),
+                "active": item.get("active", True),
+                "last_active_at": _admin_datetime(item.get("last_active_at")),
+                "collections": await db.freshers_participants.count_documents({"goodies_collected_by": item["_id"]}),
+            }
+            for item in staff_docs
+        ],
+    }
+
+
+@api.patch("/admin/freshers-campaign")
+async def admin_update_freshers_campaign(
+    body: FreshersCampaignUpdateIn, admin=Depends(get_admin_user)
+):
+    campaign = await get_freshers_campaign()
+    if not campaign:
+        raise HTTPException(404, "Freshers campaign not found")
+    values = body.model_dump(exclude_none=True)
+    manual = values.get("manual_status")
+    if manual and manual not in {"scheduled", "paused", "closed"}:
+        raise HTTPException(400, "Invalid campaign status")
+    opens_at = _aware(values.get("opens_at") or campaign["opens_at"])
+    closes_at = _aware(values.get("closes_at") or campaign["closes_at"])
+    if closes_at <= opens_at:
+        raise HTTPException(400, "Campaign closing time must be after opening time")
+    values["opens_at"] = opens_at
+    values["closes_at"] = closes_at
+    values["grace_ends_at"] = closes_at + timedelta(minutes=FRESHERS_GRACE_MINUTES)
+    if values.get("verification_deadline"):
+        values["verification_deadline"] = _aware(values["verification_deadline"])
+        if values["verification_deadline"] < values["grace_ends_at"]:
+            raise HTTPException(400, "Verification deadline cannot be before the OTP grace period ends")
+    values["updated_at"] = datetime.now(timezone.utc)
+    values["updated_by"] = admin["_id"]
+    await db.freshers_campaigns.update_one({"_id": campaign["_id"]}, {"$set": values})
+    fresh = await get_freshers_campaign()
+    if values.get("rewards_enabled"):
+        ready = await db.freshers_participants.find(
+            {
+                "campaign_id": campaign["_id"],
+                "status": {"$in": ["reserved", "promoted"]},
+                "full_verification_at": {"$exists": True},
+            },
+            {"user_id": 1},
+        ).to_list(FRESHERS_GOODIES_LIMIT)
+        for participant in ready:
+            user = await db.users.find_one({"_id": participant["user_id"]})
+            if user:
+                await unlock_freshers_reward(user)
+        fresh = await get_freshers_campaign()
+    return {"campaign": _freshers_admin_campaign(fresh)}
+
+
+@api.post("/admin/freshers-campaign/retry-failed-emails")
+async def admin_retry_freshers_emails(admin=Depends(get_admin_user)):
+    now = datetime.now(timezone.utc)
+    result = await db.freshers_email_jobs.update_many(
+        {"status": "failed"},
+        {"$set": {"status": "pending", "deliver_at": now, "error": "", "attempts": 0, "retried_by": admin["_id"], "retried_at": now}},
+    )
+    return {"ok": True, "queued": result.modified_count}
+
+
+@api.post("/admin/freshers-campaign/staff")
+async def admin_create_freshers_staff(
+    body: FreshersStaffCreateIn, admin=Depends(get_admin_user)
+):
+    validate_password(body.password)
+    email = body.email.lower().strip()
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(409, "Email already registered")
+    now = datetime.now(timezone.utc)
+    staff = {
+        "email": email,
+        "password_hash": hash_password(body.password),
+        "name": body.name.strip(),
+        "role": "event_staff",
+        "campaign_slug": FRESHERS_CAMPAIGN_SLUG,
+        "active": True,
+        "email_verified": True,
+        "verification_status": "approved",
+        "created_by": admin["_id"],
+        "created_at": now,
+    }
+    result = await db.users.insert_one(staff)
+    return {"id": str(result.inserted_id), "name": staff["name"], "email": email, "active": True}
+
+
+@api.post("/admin/freshers-campaign/bootstrap-staff")
+async def admin_bootstrap_freshers_staff(admin=Depends(get_admin_user)):
+    roster = [
+        ("Palak Gupta", "palak.gupta.kiet26@staff.savvycampusdeals.com"),
+        ("Sahil Gupta", "sahil.gupta.kiet26@staff.savvycampusdeals.com"),
+        ("Aditya Dixit", "aditya.dixit.kiet26@staff.savvycampusdeals.com"),
+        ("Satwik Srivastava", "satwik.srivastava.kiet26@staff.savvycampusdeals.com"),
+    ]
+    credentials = []
+    now = datetime.now(timezone.utc)
+    for name, email in roster:
+        if await db.users.find_one({"email": email}, {"_id": 1}):
+            continue
+        password = f"Kiet!{secrets.randbelow(900000) + 100000}{secrets.token_hex(2)}"
+        staff = {
+            "email": email,
+            "password_hash": hash_password(password),
+            "name": name,
+            "role": "event_staff",
+            "campaign_slug": FRESHERS_CAMPAIGN_SLUG,
+            "active": True,
+            "email_verified": True,
+            "verification_status": "approved",
+            "created_by": admin["_id"],
+            "created_at": now,
+        }
+        await db.users.insert_one(staff)
+        credentials.append({"name": name, "email": email, "password": password})
+    if not credentials:
+        raise HTTPException(409, "The four event staff accounts already exist; passwords cannot be shown again")
+    return {"credentials": credentials}
+
+
+@api.patch("/admin/freshers-campaign/staff/{staff_id}/status")
+async def admin_set_freshers_staff_status(
+    staff_id: str, body: AdminPartnerStatusIn, admin=Depends(get_admin_user)
+):
+    try:
+        staff_oid = ObjectId(staff_id)
+    except Exception:
+        raise HTTPException(404, "Event staff account not found")
+    result = await db.users.update_one(
+        {"_id": staff_oid, "role": "event_staff", "campaign_slug": FRESHERS_CAMPAIGN_SLUG},
+        {"$set": {"active": body.active, "updated_at": datetime.now(timezone.utc)}},
+    )
+    if not result.matched_count:
+        raise HTTPException(404, "Event staff account not found")
+    return {"ok": True}
+
+
+def _freshers_scan_code(payload: str, parameter: str, prefix: str) -> str:
+    raw = (payload or "").strip()
+    if raw.startswith("http://") or raw.startswith("https://"):
+        try:
+            from urllib.parse import parse_qs, urlparse
+            raw = parse_qs(urlparse(raw).query).get(parameter, [""])[0]
+        except Exception:
+            raw = ""
+    raw = raw.upper()
+    if not raw.startswith(prefix + "-"):
+        raise HTTPException(400, "This QR is for a different scanner")
+    return raw
+
+
+@api.get("/freshers/staff/profile")
+async def freshers_staff_profile(staff=Depends(get_event_staff_user)):
+    await db.users.update_one({"_id": staff["_id"]}, {"$set": {"last_active_at": datetime.now(timezone.utc)}})
+    return {"name": staff.get("name", ""), "email": staff.get("email", ""), "role": staff.get("role", "")}
+
+
+@api.post("/freshers/staff/lookup")
+async def freshers_staff_lookup(body: FreshersScanIn, staff=Depends(get_event_staff_user)):
+    code = _freshers_scan_code(body.payload, "g", "KFG")
+    participant = await db.freshers_participants.find_one({"goodies_code": code})
+    if not participant:
+        raise HTTPException(404, "Goodies pass not found")
+    user = await db.users.find_one({"_id": participant["user_id"]})
+    campaign = await get_freshers_campaign()
+    expired = bool(participant.get("expires_at") and _aware(participant["expires_at"]) <= datetime.now(timezone.utc))
+    return {
+        "kind": "freshers_goodies",
+        "code": code,
+        "status": "expired" if expired and participant.get("goodies_status") == "active" else participant.get("goodies_status", "active"),
+        "position": participant.get("position"),
+        "student_name": (user or {}).get("name", participant.get("name", "")),
+        "student_email": (user or {}).get("email", participant.get("email", "")),
+        "student_number": (user or {}).get("student_number", ""),
+        "student_verified": bool(user and effective_verification_status(user) == "approved"),
+        "goodies": campaign.get("goodies_description", "Savvy stickers and pamphlet") if campaign else "Savvy stickers and pamphlet",
+        "expires_at": _admin_datetime(participant.get("expires_at")),
+        "collected_at": _admin_datetime(participant.get("goodies_collected_at")),
+        "collected_by": participant.get("goodies_collected_by_name", ""),
+    }
+
+
+@api.post("/freshers/staff/collect")
+async def freshers_staff_collect(body: FreshersScanIn, staff=Depends(get_event_staff_user)):
+    code = _freshers_scan_code(body.payload, "g", "KFG")
+    participant = await db.freshers_participants.find_one({"goodies_code": code})
+    if not participant:
+        raise HTTPException(404, "Goodies pass not found")
+    campaign = await get_freshers_campaign()
+    now = datetime.now(timezone.utc)
+    event = {"campaign_id": campaign["_id"], "participant_id": participant["_id"], "staff_id": staff["_id"], "kind": "goodies", "created_at": now}
+    if participant.get("goodies_status") == "collected":
+        await db.freshers_scan_events.insert_one({**event, "result": "duplicate"})
+        raise HTTPException(409, "Goodies were already collected")
+    if participant.get("expires_at") and _aware(participant["expires_at"]) <= now:
+        raise HTTPException(410, "Goodies pass has expired")
+    user = await db.users.find_one({"_id": participant["user_id"]})
+    if not user or effective_verification_status(user) != "approved":
+        raise HTTPException(403, "Student verification is not active")
+    changed = await db.freshers_participants.update_one(
+        {"_id": participant["_id"], "goodies_status": "active", "expires_at": {"$gt": now}},
+        {"$set": {"goodies_status": "collected", "goodies_collected_at": now, "goodies_collected_by": staff["_id"], "goodies_collected_by_name": staff.get("name", ""), "updated_at": now}},
+    )
+    if not changed.matched_count:
+        await db.freshers_scan_events.insert_one({**event, "result": "duplicate"})
+        raise HTTPException(409, "Goodies were already collected")
+    await db.freshers_scan_events.insert_one({**event, "result": "collected"})
+    return {"ok": True, "student_name": user.get("name", ""), "position": participant.get("position"), "collected_at": now.isoformat(), "approved_by": staff.get("name", "")}
 
 
 @api.get("/admin/verifications")
@@ -5830,6 +6643,8 @@ def _parse_qr_payload(raw: str) -> dict:
             qs = parse_qs(u.query)
             if "c" in qs:
                 raw = qs["c"][0].strip()
+            elif "f" in qs:
+                return {"kind": "freshers_cafe", "code": qs["f"][0].strip().upper()}
             elif "r" in qs:
                 return {"kind": "level_reward", "code": qs["r"][0].strip()}
             elif "s" in qs:
@@ -5856,6 +6671,8 @@ def _parse_qr_payload(raw: str) -> dict:
         }
     if raw.upper().startswith("SVR-"):
         return {"kind": "level_reward", "code": raw.upper()}
+    if raw.upper().startswith("KFC-"):
+        return {"kind": "freshers_cafe", "code": raw.upper()}
     if raw.upper().startswith("SCD-") and len(raw) >= 8:
         # Student numbers look like SCD-2026-XXXXXX ; coupon codes like SCD-XXXXXXXX
         segs = raw.split("-")
@@ -5869,6 +6686,44 @@ def _parse_qr_payload(raw: str) -> dict:
 async def scan_lookup(body: ScanIn, scanner=Depends(get_scanner_user)):
     """Authenticated restaurant scanner lookup for student and coupon QRs."""
     parsed = _parse_qr_payload(body.payload)
+
+    if parsed["kind"] == "freshers_cafe":
+        participant = await db.freshers_participants.find_one({"cafe_code": parsed.get("code")})
+        if not participant:
+            raise HTTPException(404, "Freshers café coupon not found")
+        if scanner.get("role") != "admin" and participant.get("cafe_outlet_id") != scanner.get("outlet_id"):
+            raise HTTPException(403, "This Freshers coupon belongs to another café")
+        user = await db.users.find_one({"_id": participant["user_id"]})
+        campaign = await get_freshers_campaign()
+        expired = bool(participant.get("expires_at") and _aware(participant["expires_at"]) <= datetime.now(timezone.utc))
+        cafe_name = participant.get("cafe_name") or (
+            "The Big Bite Co." if participant.get("cafe") == "big_bite"
+            else "GOG Cafe & Bakers" if participant.get("cafe") == "gog"
+            else "S Cafe"
+        )
+        offer = participant.get("cafe_offer") or (
+            _freshers_offer(participant.get("cafe"), campaign)
+        )
+        return {
+            "kind": "freshers_cafe",
+            "code": participant["cafe_code"],
+            "status": "expired" if expired and participant.get("cafe_status") == "active" else participant.get("cafe_status", "active"),
+            "expired": expired,
+            "cafe_name": cafe_name,
+            "brand": cafe_name,
+            "cafe_address": participant.get("cafe_address", ""),
+            "offer_title": "KIET Freshers exclusive",
+            "discount": offer,
+            "student_name": (user or {}).get("name", ""),
+            "student_number": (user or {}).get("student_number", ""),
+            "student_email": (user or {}).get("email", ""),
+            "student_college": (user or {}).get("college", ""),
+            "student_verified": bool(user and effective_verification_status(user) == "approved"),
+            "student_expiry": _admin_datetime((user or {}).get("verification_expiry")),
+            "student_expiry_expired": False,
+            "expires_at": _admin_datetime(participant.get("expires_at")),
+            "redeemed_at": _admin_datetime(participant.get("cafe_redeemed_at")),
+        }
 
     if parsed["kind"] == "level_reward":
         reward = await db.savvy_level_rewards.find_one({"code": parsed.get("code")})
@@ -5989,6 +6844,31 @@ async def scan_lookup(body: ScanIn, scanner=Depends(get_scanner_user)):
 async def scan_redeem(body: ScanIn, scanner=Depends(get_scanner_user)):
     """Restaurant marks a coupon as redeemed."""
     parsed = _parse_qr_payload(body.payload)
+    if parsed["kind"] == "freshers_cafe":
+        participant = await db.freshers_participants.find_one({"cafe_code": parsed.get("code")})
+        if not participant:
+            raise HTTPException(404, "Freshers café coupon not found")
+        if scanner.get("role") != "admin" and participant.get("cafe_outlet_id") != scanner.get("outlet_id"):
+            raise HTTPException(403, "This Freshers coupon belongs to another café")
+        now = datetime.now(timezone.utc)
+        if participant.get("cafe_status") == "redeemed":
+            campaign = await get_freshers_campaign()
+            await db.freshers_scan_events.insert_one({"campaign_id": campaign["_id"], "participant_id": participant["_id"], "staff_id": scanner["_id"], "kind": "cafe", "result": "duplicate", "created_at": now})
+            raise HTTPException(409, "Freshers café coupon already redeemed")
+        if participant.get("expires_at") and _aware(participant["expires_at"]) <= now:
+            raise HTTPException(410, "Freshers café coupon has expired")
+        user = await db.users.find_one({"_id": participant["user_id"]})
+        if not user or effective_verification_status(user) != "approved":
+            raise HTTPException(403, "Student verification is not active")
+        changed = await db.freshers_participants.update_one(
+            {"_id": participant["_id"], "cafe_status": "active", "expires_at": {"$gt": now}},
+            {"$set": {"cafe_status": "redeemed", "cafe_redeemed_at": now, "cafe_redeemed_by": scanner["_id"], "updated_at": now}},
+        )
+        if not changed.matched_count:
+            raise HTTPException(409, "Freshers café coupon already redeemed")
+        campaign = await get_freshers_campaign()
+        await db.freshers_scan_events.insert_one({"campaign_id": campaign["_id"], "participant_id": participant["_id"], "staff_id": scanner["_id"], "kind": "cafe", "result": "redeemed", "created_at": now})
+        return {"ok": True, "kind": "freshers_cafe", "code": participant["cafe_code"], "student_name": user.get("name", ""), "redeemed_at": now.isoformat(), "approved_by": scanner.get("name", "")}
     if parsed["kind"] == "level_reward":
         reward = await db.savvy_level_rewards.find_one({"code": parsed.get("code")})
         if not reward:
@@ -6807,6 +7687,28 @@ async def on_startup():
         await db.email_campaign_recipients.create_index(
             [("campaign_id", 1), ("status", 1), ("created_at", 1)]
         )
+        await db.freshers_campaigns.create_index("slug", unique=True)
+        await db.freshers_participants.create_index(
+            [("campaign_id", 1), ("user_id", 1)], unique=True
+        )
+        await db.freshers_participants.create_index(
+            [("campaign_id", 1), ("position", 1)], unique=True
+        )
+        await db.freshers_participants.create_index(
+            "goodies_code", unique=True, sparse=True
+        )
+        await db.freshers_participants.create_index(
+            "cafe_code", unique=True, sparse=True
+        )
+        await db.freshers_email_jobs.create_index(
+            [("participant_id", 1), ("kind", 1)], unique=True
+        )
+        await db.freshers_email_jobs.create_index(
+            [("status", 1), ("deliver_at", 1)]
+        )
+        await db.freshers_scan_events.create_index(
+            [("campaign_id", 1), ("created_at", -1)]
+        )
         await db.outlet_daily_redemptions.create_index(
             [("user_id", 1), ("outlet_id", 1), ("day", 1)], unique=True
         )
@@ -6842,6 +7744,38 @@ async def on_startup():
     await migrate_savvy_points()
     await seed_offers()
     await seed_outlets()
+    # 26 Aug 22:00 IST through the end of 27 Aug (28 Aug 00:00 IST).
+    freshers_opens = datetime(2026, 8, 26, 16, 30, tzinfo=timezone.utc)
+    freshers_closes = datetime(2026, 8, 27, 18, 30, tzinfo=timezone.utc)
+    await db.freshers_campaigns.update_one(
+        {"slug": FRESHERS_CAMPAIGN_SLUG},
+        {
+            "$setOnInsert": {
+                "slug": FRESHERS_CAMPAIGN_SLUG,
+                "name": "KIET Freshers 2026",
+                "opens_at": freshers_opens,
+                "closes_at": freshers_closes,
+                "grace_ends_at": freshers_closes + timedelta(minutes=FRESHERS_GRACE_MINUTES),
+                "verification_deadline": None,
+                "manual_status": "scheduled",
+                "allowed_domain": FRESHERS_DOMAIN,
+                "next_position": 0,
+                "gog_offer": "One free coffee. Limited campaign pool: 30 coffees total.",
+                "s_cafe_offer": "Buy one pizza and get one free, across every pizza category and size.",
+                "big_bite_offer": "Choose one Freshers offer: Buy 1 Pizza and Get 1 Pizza FREE; or selected Chilli Potato, Noodles, Fried Rice, and Rolls at ₹99 each. Dine-in only; one offer per bill; cannot be combined with another promotion.",
+                "goodies_description": "Savvy stickers and pamphlet",
+                "pickup_location": "Collect your goodies from the registration desk, or from Palak Gupta, Sahil Gupta, Aditya Dixit, or Satwik Srivastava, by showing your goodies QR code.",
+                "rewards_enabled": False,
+                "created_at": datetime.now(timezone.utc),
+            }
+        },
+        upsert=True,
+    )
+    await db.freshers_email_jobs.update_many(
+        {"status": "sending"}, {"$set": {"status": "pending"}}
+    )
+    global _freshers_worker_task
+    _freshers_worker_task = asyncio.create_task(_freshers_job_worker())
     # Resume durable campaign jobs after a process restart. Any recipient left in
     # the transient sending state is safe to claim again from its persisted row.
     try:
@@ -6898,6 +7832,9 @@ app.add_middleware(
 
 @app.on_event("shutdown")
 async def shutdown():
+    if _freshers_worker_task:
+        _freshers_worker_task.cancel()
+        await asyncio.gather(_freshers_worker_task, return_exceptions=True)
     for task in list(_email_campaign_tasks):
         task.cancel()
     if _email_campaign_tasks:

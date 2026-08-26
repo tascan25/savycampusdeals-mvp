@@ -92,3 +92,29 @@ def test_appetito_sports_offer_uses_daily_redemption_window():
     assert server.coupon_expiry_for_offer(offer, now) == datetime(
         2026, 8, 18, 18, 30, tzinfo=timezone.utc
     )
+
+
+def test_big_bite_offers_use_daily_redemption_window():
+    outlets = json.loads((BACKEND_DIR / "data" / "outlets.json").read_text())
+    big_bite = next(
+        outlet for outlet in outlets if outlet["name"] == "The Big Bite Co."
+    )
+
+    assert len(big_bite["offers"]) == 2
+    assert all(
+        offer["redemption_policy"] == "daily"
+        for offer in big_bite["offers"]
+    )
+    assert all(
+        "once per student per day" in offer["terms"].lower()
+        for offer in big_bite["offers"]
+    )
+
+    # A Big Bite coupon claimed at noon IST expires at the end of that India
+    # calendar day, never at the standard 30-day fallback.
+    now = datetime(2026, 8, 26, 6, 30, tzinfo=timezone.utc)  # 12:00 PM IST
+    expected_expiry = datetime(2026, 8, 26, 18, 30, tzinfo=timezone.utc)
+    assert all(
+        server.coupon_expiry_for_offer(offer, now) == expected_expiry
+        for offer in big_bite["offers"]
+    )

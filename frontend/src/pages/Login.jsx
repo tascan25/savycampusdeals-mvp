@@ -31,7 +31,8 @@ export default function Login() {
       } else {
         const roleHome = r.user?.role === "admin"
           ? "/admin"
-          : r.user?.role === "outlet_partner" ? "/scan" : "/dashboard";
+          : r.user?.role === "outlet_partner" ? "/scan"
+          : r.user?.role === "event_staff" ? "/event-staff/scan" : "/dashboard";
         nav(requestedFrom || roleHome, { replace: true });
       }
     } else {
