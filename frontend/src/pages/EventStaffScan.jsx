@@ -6,6 +6,15 @@ import { toast } from "sonner";
 import api, { formatApiError } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 
+const disposeScanner = async (scanner) => {
+  if (!scanner) return;
+  try { await scanner.stop(); } catch {}
+  try {
+    const cleared = scanner.clear();
+    if (cleared && typeof cleared.catch === "function") await cleared.catch(() => {});
+  } catch {}
+};
+
 export default function EventStaffScan() {
   const { logout } = useAuth();
   const navigate = useNavigate();
@@ -36,10 +45,10 @@ export default function EventStaffScan() {
     scanner.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 250, height: 250 } }, async (decoded) => {
       if (scannedRef.current) return;
       scannedRef.current = true;
-      await scanner.stop().catch(() => {});
+      await disposeScanner(scanner);
       lookup(decoded);
     }, () => {}).catch(() => setError("Camera could not start. Use manual entry instead."));
-    return () => { scanner.stop().catch(() => {}); scanner.clear().catch(() => {}); };
+    return () => { void disposeScanner(scanner); };
   }, [mode, result]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const collect = async () => {
