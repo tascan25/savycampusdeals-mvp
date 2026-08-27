@@ -2837,6 +2837,98 @@ async def admin_freshers_campaign(admin=Depends(get_admin_user)):
     }
 
 
+def _freshers_csv_datetime(value) -> str:
+    if not value:
+        return ""
+    return _aware(value).astimezone(INDIA_TIMEZONE).strftime("%d/%m/%Y %I:%M:%S %p IST")
+
+
+@api.get("/admin/freshers-campaign/export.csv")
+async def admin_export_freshers_campaign(admin=Depends(get_admin_user)):
+    campaign = await get_freshers_campaign()
+    if not campaign:
+        raise HTTPException(404, "Freshers campaign not found")
+    participants = await db.freshers_participants.find(
+        {"campaign_id": campaign["_id"]}
+    ).sort("position", 1).to_list(None)
+    participant_ids = [item["_id"] for item in participants]
+    user_ids = list({item["user_id"] for item in participants})
+    users, email_jobs = await asyncio.gather(
+        db.users.find(
+            {"_id": {"$in": user_ids}},
+            {"student_number": 1},
+        ).to_list(len(user_ids)),
+        db.freshers_email_jobs.find(
+            {"participant_id": {"$in": participant_ids}},
+            {"participant_id": 1, "kind": 1, "status": 1},
+        ).to_list(None),
+    )
+    users_by_id = {item["_id"]: item for item in users}
+    email_status = {
+        (item["participant_id"], item.get("kind", "")): item.get("status", "")
+        for item in email_jobs
+    }
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(
+        [
+            "Registration position",
+            "Reward slot",
+            "Student name",
+            "KIET email",
+            "Student number",
+            "OTP verified at (IST)",
+            "Full verification at (IST)",
+            "Campaign status",
+            "Reward tier",
+            "Assigned cafe",
+            "Assigned cafe offer",
+            "Cafe coupon status",
+            "Cafe redeemed at (IST)",
+            "Goodies status",
+            "Goodies collected at (IST)",
+            "Goodies collected by",
+            "Passes expire at (IST)",
+            "Position email status",
+            "Reward email status",
+        ]
+    )
+    for participant in participants:
+        reward = serialize_freshers_participant(participant, campaign)
+        writer.writerow(
+            [
+                participant.get("position", ""),
+                participant.get("reward_slot", ""),
+                _csv_cell(participant.get("name", "")),
+                _csv_cell(participant.get("email", "")),
+                _csv_cell(users_by_id.get(participant.get("user_id"), {}).get("student_number", "")),
+                _freshers_csv_datetime(participant.get("otp_verified_at")),
+                _freshers_csv_datetime(participant.get("full_verification_at")),
+                participant.get("status", ""),
+                participant.get("tier", ""),
+                _csv_cell(reward.get("cafe_name") or ""),
+                _csv_cell(reward.get("offer") or ""),
+                participant.get("cafe_status", ""),
+                _freshers_csv_datetime(participant.get("cafe_redeemed_at")),
+                participant.get("goodies_status", ""),
+                _freshers_csv_datetime(participant.get("goodies_collected_at")),
+                _csv_cell(participant.get("goodies_collected_by_name", "")),
+                _freshers_csv_datetime(participant.get("expires_at")),
+                email_status.get((participant["_id"], "reservation"), "not queued"),
+                email_status.get((participant["_id"], "reward"), "not queued"),
+            ]
+        )
+    return Response(
+        content="\ufeff" + output.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": 'attachment; filename="kiet-freshers-2026-participants.csv"',
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
 @api.patch("/admin/freshers-campaign")
 async def admin_update_freshers_campaign(
     body: FreshersCampaignUpdateIn, admin=Depends(get_admin_user)
