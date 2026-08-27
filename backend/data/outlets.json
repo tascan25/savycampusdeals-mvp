@@ -410,7 +410,7 @@
         "category": "Food",
         "discount": "Buy 1 Get 1 FREE",
         "description": "Verified students can Buy 1 Pizza and Get 1 Pizza FREE at The Big Bite Co.",
-        "terms": "Offer is valid on pizza only. The free pizza must be the same pizza as the purchased item, unless otherwise permitted by the outlet. Valid once per student per day and for dine-in only. Outlet staff must scan and approve the Savvy Campus Deals QR before billing. Only one offer can be used per bill and the offer cannot be clubbed with any other discount or promotion.",
+        "terms": "Offer valid on selected pizzas only. To redeem this offer, the outlet owner or staff must scan and approve your SavvyCampusDeals offer QR before billing.",
         "redemption_policy": "daily",
         "validity": "Ongoing",
         "featured": true,
@@ -422,6 +422,37 @@
         "discount": "₹99",
         "description": "Verified students can enjoy selected items including Chilli Potato, Noodles, Fried Rice, and Rolls for just ₹99 each.",
         "terms": "Valid on selected eligible items only, including Chilli Potato, Noodles, Fried Rice, and Rolls, subject to outlet availability. Valid once per student per day and for dine-in only. Outlet staff must scan and approve the Savvy Campus Deals QR before billing. Only one offer can be used per bill and the offer cannot be clubbed with any other discount or promotion.",
+        "redemption_policy": "daily",
+        "validity": "Ongoing",
+        "featured": true,
+        "trending": true
+      }
+    ]
+  },
+  {
+    "name": "Rom's Pizza - Muradnagar",
+    "tagline": "Where Every Meal Feels Like a Treat.",
+    "cuisine": "Cafe, Fast Food",
+    "city": "Muradnagar",
+    "address": "Radhey Shyam Colony, Main, GT Rd, near Kiet Institute, Muradnagar, Ukhlarsi, Uttar Pradesh 201206",
+    "lat": 28.763256029388852,
+    "lng":  77.50402547116389,
+
+    "image_url": "/images/outlets/roms-pizza-muradnagar/thumbnail.webp",
+    "cover_url": "/images/outlets/roms-pizza-muradnagar/cover.webp",
+    "logo_url": "/images/outlets/roms-pizza-muradnagar/logo.webp",
+
+    "phone": "+91 9999447077",
+    "hours": "9:00 AM – 11:00 PM",
+    "rating": 4.7,
+
+    "offers": [
+      {
+        "title": "Buy 1 Get 1 FREE on Pizza",
+        "category": "Food",
+        "discount": "Buy 1 Get 1 FREE",
+        "description": "Verified students can Buy 1 Pizza and Get 1 Pizza FREE at Rom's Pizza - Muradnagar.",
+        "terms": "Offer is valid on pizza only. The free pizza must be the same pizza as the purchased item, unless otherwise permitted by the outlet. Valid once per student per day and for dine-in only. Outlet staff must scan and approve the SavvyCampusDeals QR before billing. Only one offer can be used per bill and the offer cannot be clubbed with any other discount or promotion.",
         "redemption_policy": "daily",
         "validity": "Ongoing",
         "featured": true,

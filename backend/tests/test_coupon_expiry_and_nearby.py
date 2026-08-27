@@ -105,9 +105,15 @@ def test_big_bite_offers_use_daily_redemption_window():
         offer["redemption_policy"] == "daily"
         for offer in big_bite["offers"]
     )
-    assert all(
-        "once per student per day" in offer["terms"].lower()
+    bogo = next(
+        offer
         for offer in big_bite["offers"]
+        if offer["title"] == "Buy 1 Get 1 FREE on Pizza"
+    )
+    assert bogo["terms"] == (
+        "Offer valid on selected pizzas only. To redeem this offer, the outlet "
+        "owner or staff must scan and approve your SavvyCampusDeals offer QR "
+        "before billing."
     )
 
     # A Big Bite coupon claimed at noon IST expires at the end of that India
@@ -117,4 +123,25 @@ def test_big_bite_offers_use_daily_redemption_window():
     assert all(
         server.coupon_expiry_for_offer(offer, now) == expected_expiry
         for offer in big_bite["offers"]
+    )
+
+
+def test_roms_pizza_offer_uses_daily_redemption_window():
+    outlets = json.loads((BACKEND_DIR / "data" / "outlets.json").read_text())
+    roms = next(
+        outlet
+        for outlet in outlets
+        if outlet["name"] == "Rom's Pizza - Muradnagar"
+    )
+    offer = roms["offers"][0]
+
+    assert offer["redemption_policy"] == "daily"
+    assert "once per student per day" in offer["terms"].lower()
+    assert "Rom's Pizza - Muradnagar" in offer["description"]
+
+    # Noon IST claim -> same-day 11:59:59-style boundary (00:00 next day),
+    # rather than the standard 30-day coupon lifetime.
+    now = datetime(2026, 8, 27, 6, 30, tzinfo=timezone.utc)
+    assert server.coupon_expiry_for_offer(offer, now) == datetime(
+        2026, 8, 27, 18, 30, tzinfo=timezone.utc
     )
