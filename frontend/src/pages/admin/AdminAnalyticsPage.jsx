@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Activity, BadgeCheck, CalendarDays, Loader2, QrCode, School, Users,
+  Activity, BadgeCheck, CalendarDays, Loader2, QrCode, School, Search, Users,
 } from "lucide-react";
 import {
   Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart,
@@ -71,6 +71,7 @@ export default function AdminAnalyticsPage() {
   const [preset, setPreset] = useState("30");
   const [dateFrom, setDateFrom] = useState(initialDates.dateFrom);
   const [dateTo, setDateTo] = useState(initialDates.dateTo);
+  const [collegeSearch, setCollegeSearch] = useState("");
 
   const analytics = useQuery({
     queryKey: ["admin-analytics", dateFrom, dateTo],
@@ -90,7 +91,19 @@ export default function AdminAnalyticsPage() {
   };
 
   const summary = analytics.data?.summary;
-  const collegeData = analytics.data?.college_registrations || [];
+  const collegeDirectory = analytics.data?.college_directory || [];
+  const normalizedCollegeSearch = collegeSearch.trim().toLowerCase();
+  const filteredColleges = collegeDirectory.filter((item) => (
+    !normalizedCollegeSearch
+    || [item.college, ...(item.variants || [])]
+      .join(" ")
+      .toLowerCase()
+      .includes(normalizedCollegeSearch)
+  ));
+  const collegeChartData = filteredColleges.slice(0, 10).map((item) => ({
+    college: item.college,
+    registrations: item.total_registrations,
+  }));
   const trendData = analytics.data?.trend || [];
   const statusData = (analytics.data?.redemption_status || []).filter((item) => item.count > 0);
   const userStatusData = (analytics.data?.user_status || [])
@@ -237,43 +250,47 @@ export default function AdminAnalyticsPage() {
 
       <div className="mt-6 grid gap-6 xl:grid-cols-5">
         <section className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:p-6 xl:col-span-3">
-          <div className="flex items-start justify-between gap-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <h2 className="font-display text-xl font-bold">Registrations by college</h2>
-              <p className="mt-1 text-sm text-zinc-500">Common spelling and campus-name variants are grouped together.</p>
+              <h2 className="font-display text-xl font-bold">College registration directory</h2>
+              <p className="mt-1 text-sm text-zinc-500">Search consolidated all-time totals while comparing the selected period.</p>
             </div>
+            <div className="relative w-full sm:w-72">
+              <Search size={15} className="absolute left-3 top-3 text-zinc-500" />
+              <input
+                value={collegeSearch}
+                onChange={(event) => setCollegeSearch(event.target.value)}
+                placeholder="Search college or variant"
+                className="w-full rounded-xl border border-white/10 bg-[#17171b] py-2.5 pl-9 pr-3 text-sm outline-none focus:border-indigo-400"
+              />
+            </div>
+          </div>
+          <div className="mt-5 flex items-center justify-between rounded-xl border border-indigo-400/15 bg-indigo-500/[0.06] px-4 py-3">
+            <div><p className="text-xs uppercase tracking-wider text-indigo-300">{normalizedCollegeSearch ? "Search results" : "Top colleges"}</p><p className="mt-1 text-sm text-zinc-400">Graph uses all-time registrations, not only the date filter.</p></div>
             <School className="shrink-0 text-indigo-300" size={20} />
           </div>
-          <div
-            className="mt-6 h-[390px] min-w-0"
-            role="img"
-            aria-label="Horizontal bar chart showing student registrations by college"
-            data-testid="analytics-college-chart"
-          >
+          <div className="mt-4 h-[300px] min-w-0" role="img" aria-label="Horizontal bar chart showing consolidated all-time college registrations" data-testid="analytics-college-chart">
             {analytics.isLoading ? (
               <div className="grid h-full place-items-center"><Loader2 className="animate-spin text-indigo-300" /></div>
-            ) : collegeData.length ? (
+            ) : collegeChartData.length ? (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={collegeData} layout="vertical" margin={{ top: 0, right: 10, left: 4, bottom: 0 }}>
+                <BarChart data={collegeChartData} layout="vertical" margin={{ top: 0, right: 10, left: 4, bottom: 0 }}>
                   <CartesianGrid stroke="rgba(255,255,255,0.06)" horizontal={false} />
                   <XAxis type="number" allowDecimals={false} stroke="#71717a" tick={{ fontSize: 11 }} />
                   <YAxis type="category" dataKey="college" width={138} tickFormatter={shortCollege} stroke="#a1a1aa" tick={{ fontSize: 11 }} />
                   <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "rgba(255,255,255,0.04)" }} />
-                  <Bar dataKey="registrations" name="Registrations" fill="#818cf8" radius={[0, 6, 6, 0]} maxBarSize={24} />
+                  <Bar dataKey="registrations" name="All-time registrations" fill="#818cf8" radius={[0, 6, 6, 0]} maxBarSize={24} />
                 </BarChart>
               </ResponsiveContainer>
-            ) : <EmptyChart message="No registrations with college information were found." />}
+            ) : <EmptyChart message={normalizedCollegeSearch ? "No college matches this search." : "No registrations with college information were found."} />}
           </div>
-          <ul className="sr-only">
-            {collegeData.map((item) => (
-              <li key={item.college}>{item.college}: {item.registrations} registrations</li>
-            ))}
-          </ul>
-          {!analytics.isLoading && (
-            <p className="mt-3 text-xs text-zinc-500">
-              {analytics.data?.registrations_without_college || 0} registrations in this period did not include a college.
-            </p>
-          )}
+          <div className="mt-5 max-h-72 overflow-auto rounded-xl border border-white/10">
+            <table className="w-full min-w-[640px] text-left text-sm" data-testid="analytics-college-directory">
+              <thead className="sticky top-0 border-b border-white/10 bg-[#131316] text-xs uppercase tracking-wider text-zinc-500"><tr><th className="p-3">College</th><th className="p-3">All time</th><th className="p-3">Selected period</th><th className="p-3">Grouped entries</th></tr></thead>
+              <tbody>{filteredColleges.length ? filteredColleges.slice(0, 100).map((item) => <tr key={item.college} className="border-b border-white/[0.06] last:border-0"><td className="p-3 font-semibold">{item.college}</td><td className="p-3 text-lg font-bold text-indigo-200">{item.total_registrations}</td><td className="p-3 text-zinc-300">{item.period_registrations}</td><td className="max-w-xs p-3"><p className="text-xs text-zinc-400">{item.variants?.length || 1} name variant{item.variants?.length === 1 ? "" : "s"}</p><p className="mt-1 truncate text-[11px] text-zinc-600" title={(item.variants || []).join(" · ")}>{(item.variants || []).slice(0, 3).join(" · ")}</p></td></tr>) : <tr><td colSpan="4" className="p-8 text-center text-zinc-500">No colleges match your search.</td></tr>}</tbody>
+            </table>
+          </div>
+          {!analytics.isLoading && <p className="mt-3 text-xs text-zinc-500">Selected period: {analytics.data?.period?.date_from} — {analytics.data?.period?.date_to}. {analytics.data?.registrations_without_college || 0} registrations in this period did not include a college.</p>}
         </section>
 
         <section className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:p-6 xl:col-span-2">

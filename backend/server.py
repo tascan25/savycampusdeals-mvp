@@ -17,6 +17,7 @@ import asyncio
 import html
 import re
 import math
+from difflib import SequenceMatcher
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Any
 from zoneinfo import ZoneInfo
@@ -4900,6 +4901,18 @@ def canonical_college_name(value: str) -> str:
         cleaned,
     )
     cleaned = re.sub(r"\s+", " ", cleaned)
+    cleaned = " ".join(
+        _COLLEGE_WORD_CORRECTIONS.get(token, token)
+        for token in cleaned.split()
+    )
+
+    # KIET has been entered with many legal-name, school, campus, location and
+    # spelling suffixes. Treat the standalone acronym and its expanded Krishna
+    # Institute name as one institution before applying generic clustering.
+    if re.match(r"^kiets?(?:\s|$)", cleaned) or re.match(
+        r"^krishna institute of (?:engineering|technology)(?:\s|$)", cleaned
+    ):
+        return "KIET University"
 
     # Keep aliases explicit: broad fuzzy matching can merge different colleges.
     if re.match(r"^a?amity university(?:\s+.*)?$", cleaned):
@@ -4972,6 +4985,206 @@ def canonical_college_name(value: str) -> str:
     )
 
 
+_COLLEGE_STOP_WORDS = {
+    "a", "and", "at", "deemed", "for", "of", "the", "to", "with",
+}
+_COLLEGE_INSTITUTION_WORDS = {
+    "academy", "college", "institute", "institution", "school", "university",
+}
+_COLLEGE_SPECIALISATIONS = {
+    "architecture", "business", "dental", "engineering", "law", "management",
+    "medical", "medicine", "pharmacy", "polytechnic", "technology",
+}
+_COLLEGE_WORD_CORRECTIONS = {
+    "collage": "college",
+    "colleage": "college",
+    "enginering": "engineering",
+    "enginnering": "engineering",
+    "institue": "institute",
+    "institutue": "institute",
+    "technlogy": "technology",
+    "univercity": "university",
+    "univeristy": "university",
+    "unversity": "university",
+}
+
+
+def _college_identity(value: str) -> dict:
+    """Return comparison features without changing the student's stored value."""
+    normalized = re.sub(r"[^a-z0-9]+", " ", (value or "").casefold()).strip()
+    tokens = [
+        _COLLEGE_WORD_CORRECTIONS.get(token, token)
+        for token in normalized.split()
+        if token
+    ]
+    significant = [token for token in tokens if token not in _COLLEGE_STOP_WORDS]
+    core = [
+        token
+        for token in significant
+        if token not in _COLLEGE_INSTITUTION_WORDS
+    ]
+    acronym = "".join(token[0] for token in significant if token).casefold()
+    compact = "".join(significant)
+    return {
+        "phrase": " ".join(significant),
+        "tokens": significant,
+        "token_set": set(significant),
+        "core": core,
+        "core_set": set(core),
+        "acronym": acronym,
+        "compact": compact,
+        "specialisations": set(significant) & _COLLEGE_SPECIALISATIONS,
+        "has_institution_word": bool(
+            set(significant) & _COLLEGE_INSTITUTION_WORDS
+        ),
+    }
+
+
+def _college_names_match(left: str, right: str) -> bool:
+    """Conservatively identify two labels that describe the same college."""
+    first = _college_identity(left)
+    second = _college_identity(right)
+    if not first["phrase"] or not second["phrase"]:
+        return False
+    if first["phrase"] == second["phrase"]:
+        return True
+    if first["token_set"] == second["token_set"]:
+        return True
+
+    # A short acronym can identify a longer institution name (DU, IITD, etc.).
+    for short, long in ((first, second), (second, first)):
+        if (
+            len(short["tokens"]) == 1
+            and 2 <= len(short["compact"]) <= 10
+            and short["compact"] == long["acronym"]
+        ):
+            return True
+
+    # Match a full institution name followed by a campus/location qualifier.
+    # Do not collapse a specialist college into its parent institution.
+    for shorter, longer in sorted(
+        ((first, second), (second, first)),
+        key=lambda pair: len(pair[0]["tokens"]),
+    ):
+        if len(shorter["tokens"]) >= len(longer["tokens"]):
+            continue
+        short_phrase = shorter["phrase"]
+        long_phrase = longer["phrase"]
+        contained = (
+            long_phrase.startswith(f"{short_phrase} ")
+            or long_phrase.endswith(f" {short_phrase}")
+        )
+        added_specialisations = (
+            longer["specialisations"] - shorter["specialisations"]
+        )
+        if contained and not added_specialisations and shorter["core_set"]:
+            return True
+
+    # Word-order and small spelling variations still group when most of a
+    # sufficiently distinctive institution name is shared.
+    if len(first["core_set"]) >= 2 and len(second["core_set"]) >= 2:
+        union = first["core_set"] | second["core_set"]
+        overlap = len(first["core_set"] & second["core_set"]) / len(union)
+        ordered_similarity = SequenceMatcher(
+            None,
+            " ".join(sorted(first["tokens"])),
+            " ".join(sorted(second["tokens"])),
+        ).ratio()
+        if overlap >= 0.8 and ordered_similarity >= 0.88:
+            return True
+    return False
+
+
+def build_college_registration_directory(
+    all_time_rows: list[dict], period_rows: Optional[list[dict]] = None
+) -> list[dict]:
+    """Build searchable all-time college totals with selected-period context."""
+    entries = []
+    for rows, scope in ((all_time_rows, "all_time"), (period_rows or [], "period")):
+        for row in rows:
+            raw_name = (row.get("college") or "").strip()
+            registrations = row.get("registrations", 0)
+            if not raw_name or not registrations:
+                continue
+            entries.append(
+                {
+                    "name": canonical_college_name(raw_name),
+                    "raw_name": raw_name,
+                    "all_time": registrations if scope == "all_time" else 0,
+                    "period": registrations if scope == "period" else 0,
+                }
+            )
+    if not entries:
+        return []
+
+    parents = list(range(len(entries)))
+
+    def find(index: int) -> int:
+        while parents[index] != index:
+            parents[index] = parents[parents[index]]
+            index = parents[index]
+        return index
+
+    def union(left_index: int, right_index: int):
+        left_root, right_root = find(left_index), find(right_index)
+        if left_root != right_root:
+            parents[right_root] = left_root
+
+    for left_index, left in enumerate(entries):
+        for right_index in range(left_index + 1, len(entries)):
+            if _college_names_match(left["name"], entries[right_index]["name"]):
+                union(left_index, right_index)
+
+    clusters: dict[int, list[dict]] = {}
+    for index, entry in enumerate(entries):
+        clusters.setdefault(find(index), []).append(entry)
+
+    directory = []
+    for cluster in clusters.values():
+        # Prefer a descriptive institution label over an acronym, then the
+        # shortest base label over a campus-qualified variant.
+        display_name = min(
+            {entry["name"] for entry in cluster},
+            key=lambda name: (
+                not _college_identity(name)["has_institution_word"],
+                len(_college_identity(name)["tokens"]),
+                len(name),
+                name,
+            ),
+        )
+        directory.append(
+            {
+                "college": display_name,
+                "total_registrations": sum(
+                    entry["all_time"] for entry in cluster
+                ),
+                "period_registrations": sum(
+                    entry["period"] for entry in cluster
+                ),
+                "variants": sorted(
+                    {
+                        entry["raw_name"]
+                        for entry in cluster
+                        if entry["all_time"]
+                    },
+                    key=str.casefold,
+                ),
+            }
+        )
+    return sorted(
+        directory,
+        key=lambda item: (-item["total_registrations"], item["college"]),
+    )
+
+
+def group_college_registrations(rows: list[dict]) -> dict[str, int]:
+    """Backward-compatible count mapping for analytics and unit consumers."""
+    return {
+        item["college"]: item["total_registrations"]
+        for item in build_college_registration_directory(rows)
+    }
+
+
 @api.get("/admin/analytics")
 async def admin_analytics(
     date_from: Optional[str] = Query(None),
@@ -5030,6 +5243,7 @@ async def admin_analytics(
         approval_trend,
         redemption_trend,
         college_rows,
+        all_time_college_rows,
         college_missing,
         status_rows,
         user_status_rows,
@@ -5079,6 +5293,27 @@ async def admin_analytics(
                 {"$sort": {"registrations": -1, "college": 1}},
             ]
         ).to_list(2000),
+        db.users.aggregate(
+            [
+                {"$match": student_query},
+                {
+                    "$project": {
+                        "college": {
+                            "$trim": {"input": {"$ifNull": ["$college", ""]}}
+                        }
+                    }
+                },
+                {"$match": {"college": {"$ne": ""}}},
+                {
+                    "$group": {
+                        "_id": {"$toLower": "$college"},
+                        "college": {"$first": "$college"},
+                        "registrations": {"$sum": 1},
+                    }
+                },
+                {"$sort": {"registrations": -1, "college": 1}},
+            ]
+        ).to_list(5000),
         db.users.count_documents(
             {
                 **registration_query,
@@ -5225,14 +5460,10 @@ async def admin_analytics(
         if status in user_status_counts:
             user_status_counts[status] += row.get("count", 0)
 
-    grouped_colleges: dict[str, int] = {}
-    for row in college_rows:
-        college = canonical_college_name(row.get("college") or "")
-        if college:
-            grouped_colleges[college] = (
-                grouped_colleges.get(college, 0)
-                + row.get("registrations", 0)
-            )
+    grouped_colleges = group_college_registrations(college_rows)
+    college_directory = build_college_registration_directory(
+        all_time_college_rows, college_rows
+    )
     top_colleges = sorted(
         grouped_colleges.items(),
         key=lambda item: (-item[1], item[0]),
@@ -5270,6 +5501,7 @@ async def admin_analytics(
             }
             for college, registrations in top_colleges
         ],
+        "college_directory": college_directory,
         "registrations_without_college": college_missing,
         "user_status": [
             {"status": status, "count": user_status_counts[status]}
@@ -5459,6 +5691,9 @@ async def _load_brand_outlet_report_data(
                 "created_at": 1,
                 "expires_at": 1,
                 "redeemed_at": 1,
+                "approved_at": 1,
+                "approved_by_user_id": 1,
+                "redeemed_by_user_id": 1,
             },
         ).to_list(None),
         db.brand_offer_claims.find(
@@ -5495,6 +5730,192 @@ async def _load_brand_outlet_report_data(
         for claim in brand_claims
     )
     return outlets, offers, coupons
+
+
+@api.get("/admin/offer-activity")
+async def admin_offer_activity(
+    activity_type: str = Query("all", alias="type"),
+    status: Optional[str] = Query(None),
+    partner_id: Optional[str] = Query(None, max_length=200),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    admin=Depends(get_admin_user),
+):
+    """Unified, read-only activity for outlet coupons and listed-brand claims."""
+    if activity_type not in {"all", "outlet", "brand"}:
+        raise HTTPException(400, "Type must be all, outlet, or brand")
+    if status and status not in {"claimed", "active", "redeemed", "expired"}:
+        raise HTTPException(400, "Invalid activity status")
+
+    start, end = _admin_report_date_range(date_from, date_to)
+    outlets, offers, activities = await _load_brand_outlet_report_data(start, end)
+    outlet_by_id = {outlet["_id"]: outlet for outlet in outlets}
+    offer_by_id = {offer["_id"]: offer for offer in offers}
+    now = datetime.now(timezone.utc)
+    rows = []
+    for activity in activities:
+        offer = offer_by_id.get(activity.get("offer_id"))
+        if not offer:
+            continue
+        outlet_id = offer.get("outlet_id") or activity.get("outlet_id")
+        is_brand_claim = not bool(outlet_id)
+        row_type = "brand" if is_brand_claim else "outlet"
+        if activity_type != "all" and row_type != activity_type:
+            continue
+        if is_brand_claim:
+            row_partner_id = (offer.get("brand") or "Unnamed brand").strip()
+            partner_name = row_partner_id
+            location = "Online"
+            effective_status = "claimed"
+        else:
+            outlet = outlet_by_id.get(outlet_id, {})
+            row_partner_id = str(outlet_id)
+            partner_name = outlet.get("name") or offer.get("brand", "")
+            location = outlet.get("city") or outlet.get("address", "")
+            effective_status = _report_coupon_status(activity, now)
+        if partner_id and row_partner_id.casefold() != partner_id.casefold():
+            continue
+        rows.append(
+            {
+                "activity": activity,
+                "offer": offer,
+                "type": row_type,
+                "partner_id": row_partner_id,
+                "partner_name": partner_name,
+                "location": location,
+                "status": effective_status,
+            }
+        )
+
+    groups: dict[tuple[str, str], dict] = {}
+    for row in rows:
+        key = (row["type"], row["partner_id"].casefold())
+        group = groups.setdefault(
+            key,
+            {
+                "type": row["type"],
+                "id": row["partner_id"],
+                "name": row["partner_name"],
+                "location": row["location"],
+                "claimed": 0,
+                "active": 0,
+                "redeemed": 0,
+                "expired": 0,
+                "brand_claims": 0,
+                "_students": set(),
+            },
+        )
+        group["claimed"] += 1
+        if row["type"] == "brand":
+            group["brand_claims"] += 1
+        else:
+            group[row["status"]] += 1
+        if row["activity"].get("user_id"):
+            group["_students"].add(row["activity"]["user_id"])
+    group_items = []
+    for group in groups.values():
+        group["unique_students"] = len(group.pop("_students"))
+        group_items.append(group)
+    group_items.sort(key=lambda item: (-item["claimed"], item["name"].casefold()))
+
+    summary = {
+        "total_claims": len(rows),
+        "outlet_coupons": sum(row["type"] == "outlet" for row in rows),
+        "brand_claims": sum(row["type"] == "brand" for row in rows),
+        "active": sum(row["status"] == "active" for row in rows),
+        "redeemed": sum(row["status"] == "redeemed" for row in rows),
+        "expired": sum(row["status"] == "expired" for row in rows),
+        "unique_students": len(
+            {row["activity"].get("user_id") for row in rows if row["activity"].get("user_id")}
+        ),
+    }
+    filtered_rows = [row for row in rows if not status or row["status"] == status]
+    filtered_rows.sort(
+        key=lambda row: _aware(row["activity"].get("created_at"))
+        if row["activity"].get("created_at")
+        else datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+    total = len(filtered_rows)
+    selected = filtered_rows[(page - 1) * page_size : page * page_size]
+    user_ids = {
+        user_id
+        for row in selected
+        for user_id in (
+            row["activity"].get("user_id"),
+            row["activity"].get("approved_by_user_id")
+            or row["activity"].get("redeemed_by_user_id"),
+        )
+        if user_id
+    }
+    users = await db.users.find(
+        {"_id": {"$in": list(user_ids)}},
+        {"name": 1, "email": 1, "college": 1, "student_number": 1},
+    ).to_list(len(user_ids) or 1)
+    user_by_id = {user["_id"]: user for user in users}
+    items = []
+    for row in selected:
+        activity = row["activity"]
+        offer = row["offer"]
+        student = user_by_id.get(activity.get("user_id"), {})
+        approver_id = activity.get("approved_by_user_id") or activity.get(
+            "redeemed_by_user_id"
+        )
+        approver = user_by_id.get(approver_id, {})
+        is_brand_claim = row["type"] == "brand"
+        items.append(
+            {
+                "id": str(activity.get("_id", "")),
+                "type": row["type"],
+                "partner_id": row["partner_id"],
+                "partner_name": row["partner_name"],
+                "location": row["location"],
+                "student_id": str(activity.get("user_id", "")),
+                "student_name": student.get("name", ""),
+                "student_email": student.get("email", ""),
+                "student_number": student.get("student_number", ""),
+                "student_college": student.get("college", ""),
+                "offer_id": str(activity.get("offer_id", "")),
+                "offer_title": offer.get("title", ""),
+                "discount": offer.get("discount", ""),
+                "validity": offer.get("validity", ""),
+                "code": "" if is_brand_claim else activity.get("code", ""),
+                "status": row["status"],
+                "claimed_at": _admin_datetime(activity.get("created_at")),
+                "expires_at": None
+                if is_brand_claim
+                else _admin_datetime(activity.get("expires_at")),
+                "redeemed_at": _admin_datetime(activity.get("redeemed_at")),
+                "approved_at": _admin_datetime(
+                    activity.get("approved_at") or activity.get("redeemed_at")
+                ),
+                "approved_by_name": approver.get("name", "") if approver_id else "",
+                "last_visited_at": _admin_datetime(activity.get("last_visited_at")),
+                "visit_count": activity.get("visit_count", 1) if is_brand_claim else None,
+            }
+        )
+    partners = [
+        {
+            "type": group["type"],
+            "id": group["id"],
+            "name": group["name"],
+            "location": group["location"],
+        }
+        for group in sorted(group_items, key=lambda item: (item["type"], item["name"].casefold()))
+    ]
+    return {
+        "summary": summary,
+        "groups": group_items,
+        "partners": partners,
+        "items": items,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "generated_at": now.isoformat(),
+        "date_basis": "Date filters use the original claim time. Expired coupon status is calculated from its expiry time.",
+    }
 
 
 @api.get("/admin/brands-outlets")
