@@ -19,7 +19,7 @@ import re
 import math
 from difflib import SequenceMatcher
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List, Any
+from typing import Literal, Optional, List, Any
 from zoneinfo import ZoneInfo
 
 import bcrypt
@@ -40,6 +40,7 @@ from fastapi import (
     Query,
 )
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, EmailStr, Field
 from pymongo import ReturnDocument
@@ -64,6 +65,11 @@ MONGO_URL = os.environ["MONGO_URL"]
 DB_NAME = os.environ["DB_NAME"]
 JWT_SECRET = os.environ["JWT_SECRET"]
 JWT_ALGO = "HS256"
+# Mobile clients use a short-lived access token + rotating refresh token
+# (see `sessions` collection) instead of the website's 7-day cookie token.
+# The website's create_access_token behavior is unchanged (default below).
+MOBILE_ACCESS_TOKEN_MINUTES = 15
+MOBILE_REFRESH_TOKEN_DAYS = 45
 INDIA_TIMEZONE = ZoneInfo("Asia/Kolkata")
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
@@ -125,18 +131,74 @@ def verify_password(p: str, h: str) -> bool:
         return False
 
 
-def create_access_token(uid: str, email: str, role: str) -> str:
+def create_access_token(
+    uid: str,
+    email: str,
+    role: str,
+    expires_delta: timedelta = timedelta(days=7),
+) -> str:
     return jwt.encode(
         {
             "sub": uid,
             "email": email,
             "role": role,
             "type": "access",
-            "exp": datetime.now(timezone.utc) + timedelta(days=7),
+            "exp": datetime.now(timezone.utc) + expires_delta,
         },
         JWT_SECRET,
         algorithm=JWT_ALGO,
     )
+
+
+def _hash_refresh_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+async def _create_mobile_session(
+    user: dict,
+    *,
+    family_id: str,
+    device_name: str = "",
+    platform: Optional[str] = None,
+    ip: str = "",
+    user_agent: str = "",
+) -> dict:
+    """Inserts a new session document and returns the token pair for it.
+
+    Called both for a brand-new login/register (fresh family_id) and for
+    each refresh rotation (same family_id, new document) — see
+    mobile/docs/authentication.md for the rotation/reuse-detection design.
+    """
+    now = datetime.now(timezone.utc)
+    refresh_token = secrets.token_urlsafe(32)
+    access_token = create_access_token(
+        str(user["_id"]),
+        user["email"],
+        user.get("role", "student"),
+        expires_delta=timedelta(minutes=MOBILE_ACCESS_TOKEN_MINUTES),
+    )
+    await db.sessions.insert_one(
+        {
+            "user_id": user["_id"],
+            "refresh_token_hash": _hash_refresh_token(refresh_token),
+            "family_id": family_id,
+            "device_name": device_name or "",
+            "platform": platform,
+            "ip_created": ip,
+            "user_agent": user_agent,
+            "created_at": now,
+            "last_used_at": now,
+            "expires_at": now + timedelta(days=MOBILE_REFRESH_TOKEN_DAYS),
+            "revoked": False,
+            "revoked_at": None,
+            "revoked_reason": None,
+        }
+    )
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "expires_in": MOBILE_ACCESS_TOKEN_MINUTES * 60,
+    }
 
 
 SAVVY_POINT_TIERS = [
@@ -978,6 +1040,26 @@ class LoginIn(BaseModel):
     password: str
 
 
+class MobileRegisterIn(RegisterIn):
+    device_name: Optional[str] = ""
+    platform: Optional[Literal["ios", "android"]] = None
+
+
+class MobileLoginIn(BaseModel):
+    email: EmailStr
+    password: str
+    device_name: Optional[str] = ""
+    platform: Optional[Literal["ios", "android"]] = None
+
+
+class MobileRefreshIn(BaseModel):
+    refresh_token: str
+
+
+class MobileLogoutIn(BaseModel):
+    refresh_token: str
+
+
 class ForgotIn(BaseModel):
     email: EmailStr
 
@@ -1612,8 +1694,12 @@ def otp_response(email_result: dict, otp: str, **extra) -> dict:
     return response
 
 
-@api.post("/auth/register")
-async def register(body: RegisterIn, response: Response):
+async def _register_student_account(body: RegisterIn) -> tuple[dict, str, dict]:
+    """Shared by the website's /auth/register and mobile's /auth/mobile/register:
+    creates the student user, welcome points, pending referral, and signup
+    OTP email. Returns (user_doc, otp, email_result) — the caller decides how
+    to issue a session (cookie+token for web, access+refresh pair for mobile).
+    """
     validate_password(body.password)
     email = body.email.lower().strip()
     existing = await db.users.find_one({"email": email})
@@ -1723,7 +1809,13 @@ async def register(body: RegisterIn, response: Response):
         email_result["ok"],
     )
 
-    token = create_access_token(str(result.inserted_id), email, "student")
+    return user_doc, otp, email_result
+
+
+@api.post("/auth/register")
+async def register(body: RegisterIn, response: Response):
+    user_doc, otp, email_result = await _register_student_account(body)
+    token = create_access_token(str(user_doc["_id"]), user_doc["email"], "student")
     set_auth_cookie(response, token)
     resp = {
         "user": serialize_user(user_doc),
@@ -2000,6 +2092,185 @@ async def verify_email(token: str):
     }
 
 
+# -----------------------------
+# Mobile auth (short-lived access token + rotating refresh token)
+# -----------------------------
+# Additive to the website's cookie/7-day-token flow above — nothing in this
+# section changes /auth/login, /auth/register or set_auth_cookie. See
+# mobile/docs/authentication.md for the design.
+def _request_ip(request: Request) -> str:
+    return request.client.host if request.client else ""
+
+
+def _request_user_agent(request: Request) -> str:
+    return request.headers.get("user-agent", "")[:512]
+
+
+@api.post("/auth/mobile/register")
+async def mobile_register(body: MobileRegisterIn, request: Request):
+    user_doc, otp, email_result = await _register_student_account(body)
+    session = await _create_mobile_session(
+        user_doc,
+        family_id=secrets.token_urlsafe(12),
+        device_name=body.device_name or "",
+        platform=body.platform,
+        ip=_request_ip(request),
+        user_agent=_request_user_agent(request),
+    )
+    resp = {
+        "user": serialize_user(user_doc),
+        "email_sent": email_result["ok"],
+        **session,
+    }
+    if DEV_OTP_FALLBACK and not email_result["ok"]:
+        resp["dev_otp"] = otp
+        resp["email_error"] = email_result["error"]
+    return resp
+
+
+@api.post("/auth/mobile/login")
+async def mobile_login(body: MobileLoginIn, request: Request):
+    email = body.email.lower().strip()
+    user = await db.users.find_one({"email": email})
+    if not user or not verify_password(body.password, user["password_hash"]):
+        raise HTTPException(401, "Invalid email or password")
+    if user.get("role") in {"outlet_partner", "event_staff"} and not user.get("active", True):
+        raise HTTPException(403, "This account is disabled")
+    user = await expire_verification_if_needed(user)
+    session = await _create_mobile_session(
+        user,
+        family_id=secrets.token_urlsafe(12),
+        device_name=body.device_name or "",
+        platform=body.platform,
+        ip=_request_ip(request),
+        user_agent=_request_user_agent(request),
+    )
+    return {"user": serialize_user(user), **session}
+
+
+@api.post("/auth/mobile/refresh")
+async def mobile_refresh(body: MobileRefreshIn):
+    now = datetime.now(timezone.utc)
+    token_hash = _hash_refresh_token(body.refresh_token)
+    generic_error = HTTPException(401, "Session expired. Please sign in again.")
+    # Claim-and-retire the refresh token atomically. A read followed by an
+    # unconditional update lets two concurrent requests both rotate the same
+    # token and creates two valid descendants in one family.
+    session = await db.sessions.find_one_and_update(
+        {
+            "refresh_token_hash": token_hash,
+            "revoked": False,
+            "expires_at": {"$gt": now},
+        },
+        {
+            "$set": {
+                "revoked": True,
+                "revoked_at": now,
+                "revoked_reason": "rotated",
+                "last_used_at": now,
+            }
+        },
+        return_document=ReturnDocument.BEFORE,
+    )
+    if not session:
+        stale_session = await db.sessions.find_one({"refresh_token_hash": token_hash})
+        if not stale_session:
+            raise generic_error
+        if not stale_session.get("revoked") and _aware(stale_session["expires_at"]) <= now:
+            await db.sessions.update_one(
+                {"_id": stale_session["_id"], "revoked": False},
+                {
+                    "$set": {
+                        "revoked": True,
+                        "revoked_at": now,
+                        "revoked_reason": "expired",
+                    }
+                },
+            )
+        elif stale_session.get("revoked"):
+            # A token that has already been rotated or explicitly revoked was
+            # presented again. Retire the remaining lineage so a copied token
+            # cannot race the legitimate client indefinitely.
+            await db.sessions.update_many(
+                {"family_id": stale_session["family_id"], "revoked": False},
+                {
+                    "$set": {
+                        "revoked": True,
+                        "revoked_at": now,
+                        "revoked_reason": "reuse_detected",
+                    }
+                },
+            )
+            logger.warning(
+                "Mobile refresh-token reuse detected for user %s (family %s)",
+                stale_session["user_id"],
+                stale_session["family_id"],
+            )
+        raise generic_error
+    user = await db.users.find_one({"_id": session["user_id"]})
+    if not user:
+        raise generic_error
+    if user.get("role") in {"outlet_partner", "event_staff"} and not user.get("active", True):
+        raise HTTPException(403, "This account is disabled")
+    user = await expire_verification_if_needed(user)
+    # The claimed token remains for reuse detection/audit until TTL expiry;
+    # one new document takes over the same family lineage.
+    new_session = await _create_mobile_session(
+        user,
+        family_id=session["family_id"],
+        device_name=session.get("device_name", ""),
+        platform=session.get("platform"),
+        ip=session.get("ip_created", ""),
+        user_agent=session.get("user_agent", ""),
+    )
+    return {"user": serialize_user(user), **new_session}
+
+
+@api.post("/auth/mobile/logout")
+async def mobile_logout(body: MobileLogoutIn):
+    """Revoke this refresh token even when its access token has expired."""
+    now = datetime.now(timezone.utc)
+    await db.sessions.update_one(
+        {
+            "refresh_token_hash": _hash_refresh_token(body.refresh_token),
+            "revoked": False,
+        },
+        {"$set": {"revoked": True, "revoked_at": now, "revoked_reason": "logout"}},
+    )
+    return {"ok": True}
+
+
+@api.post("/auth/mobile/logout-all")
+async def mobile_logout_all(user=Depends(get_current_user)):
+    now = datetime.now(timezone.utc)
+    result = await db.sessions.update_many(
+        {"user_id": user["_id"], "revoked": False},
+        {"$set": {"revoked": True, "revoked_at": now, "revoked_reason": "logout_all"}},
+    )
+    await db.device_tokens.delete_many({"user_id": user["_id"]})
+    return {"ok": True, "revoked_count": result.modified_count}
+
+
+@api.get("/auth/mobile/sessions")
+async def mobile_sessions(user=Depends(get_current_user)):
+    now = datetime.now(timezone.utc)
+    cursor = db.sessions.find(
+        {"user_id": user["_id"], "revoked": False, "expires_at": {"$gt": now}}
+    ).sort("last_used_at", -1)
+    return {
+        "sessions": [
+            {
+                "id": str(doc["_id"]),
+                "device_name": doc.get("device_name") or "Unknown device",
+                "platform": doc.get("platform"),
+                "created_at": doc["created_at"].isoformat(),
+                "last_used_at": doc["last_used_at"].isoformat(),
+            }
+            async for doc in cursor
+        ]
+    }
+
+
 @api.post("/auth/forgot-password")
 async def forgot(body: ForgotIn):
     email = body.email.lower().strip()
@@ -2207,6 +2478,8 @@ async def delete_account(
         db.offer_once_redemptions,
         db.otp_codes,
         db.password_resets,
+        db.sessions,
+        db.device_tokens,
     )
 
     async def purge_database_records(session):
@@ -8266,6 +8539,12 @@ async def on_startup():
         )
         await db.password_resets.create_index("expires_at", expireAfterSeconds=0)
         await db.otp_codes.create_index("expires_at", expireAfterSeconds=0)
+        await db.sessions.create_index("refresh_token_hash", unique=True)
+        await db.sessions.create_index([("user_id", 1), ("revoked", 1)])
+        await db.sessions.create_index([("family_id", 1)])
+        await db.sessions.create_index("expires_at", expireAfterSeconds=0)
+        await db.device_tokens.create_index([("user_id", 1)])
+        await db.device_tokens.create_index("token", unique=True)
     except Exception as e:
         logger.warning(f"Index warn: {e}")
     await db.users.update_many(
@@ -8361,6 +8640,18 @@ async def health():
 
 # Mount router + CORS
 app.include_router(api)
+
+# Outlet and selected brand artwork lives in frontend/public so the website can
+# keep using root-relative /images paths. Expose that same read-only directory
+# from the API host as well; native clients should not need the React dev server
+# running merely to load media.
+PUBLIC_IMAGES_DIR = ROOT_DIR.parent / "frontend" / "public" / "images"
+if PUBLIC_IMAGES_DIR.is_dir():
+    app.mount(
+        "/images",
+        StaticFiles(directory=str(PUBLIC_IMAGES_DIR), check_dir=True),
+        name="public-images",
+    )
 
 app.add_middleware(
     CORSMiddleware,

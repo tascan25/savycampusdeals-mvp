@@ -81,6 +81,8 @@ def fake_db(*, verification_rows=None):
         "offer_once_redemptions",
         "otp_codes",
         "password_resets",
+        "sessions",
+        "device_tokens",
         "referrals",
     )
     collections = {name: FakeCollection() for name in names}

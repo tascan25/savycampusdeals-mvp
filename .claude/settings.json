@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx prettier *)",
+      "Read(//private/tmp/**)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://127.0.0.1:8000/api/offers)",
+      "Bash(curl -s http://127.0.0.1:8000/api/offers)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(len\\(d\\)\\); print\\(d[0] if d else None\\)\")",
+      "Bash(xcodebuild -workspace ios/SavvyCampus.xcworkspace -scheme SavvyCampus -sdk iphonesimulator -destination \"platform=iOS Simulator,id=D27BD870-98D8-4B68-9863-45CE3B9D1DA6\" -derivedDataPath ios/build_phase3 build)",
+      "Bash(curl -s http://127.0.0.1:8000/api/outlets/6a8f9b87b747ecb5d6f71f09 -H 'Authorization: Bearer __CMDSUB_OUTPUT__')",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/api/offers/6a8f9b87b747ecb5d6f71f0a/claim -H 'Authorization: Bearer __CMDSUB_OUTPUT__')",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/api/offers/6a6dbe6b4a4b4f303b6df392/claim -H 'Authorization: Bearer __CMDSUB_OUTPUT__')",
+      "Bash(python3 -m json.tool)",
+      "Bash(xcrun simctl *)",
+      "Read(//tmp/**)",
+      "Bash(pkill -f \"expo start\")",
+      "Bash(pkill -f \"uvicorn server:app\")",
+      "WebFetch(domain:docs.expo.dev)",
+      "Bash(nohup npx expo start)",
+      "Bash(echo \"pid $!\")",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/api/auth/mobile/register -H 'Content-Type: application/json' -d '{\"name\":\"Phase Four Tester\",\"email\":\"phase4test___CMDSUB_OUTPUT__@example.com\",\"password\":\"TestPass123!\",\"college\":\"Test College\",\"platform\":\"ios\"}')",
+      "Bash(curl -s http://127.0.0.1:8000/api/coupons -H 'Authorization: Bearer __CMDSUB_OUTPUT__')",
+      "Bash(curl -s http://127.0.0.1:8000/api/savvy-points/overview -H 'Authorization: Bearer __CMDSUB_OUTPUT__')",
+      "Bash(xcodebuild -workspace ios/SavvyCampus.xcworkspace -scheme SavvyCampus -sdk iphonesimulator -destination \"platform=iOS Simulator,id=D27BD870-98D8-4B68-9863-45CE3B9D1DA6\" -derivedDataPath ios/build_phase5 build)",
+      "Bash(venv/bin/python3.13 -c ' *)"
+    ]
+  }
+}
