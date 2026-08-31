@@ -20,7 +20,10 @@ export async function apiSubmitVerification(input: {
   year: string;
   student_id_number: string;
 }): Promise<SubmitVerificationResult> {
-  const { data } = await apiClient.post("/verification/submit", input);
+  // Two base64 images are validated and uploaded before this request returns.
+  // Give it a dedicated window instead of the shorter default used by normal
+  // JSON requests, otherwise the server may succeed after the app times out.
+  const { data } = await apiClient.post("/verification/submit", input, { timeout: 60_000 });
   return data;
 }
 

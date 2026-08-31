@@ -25,10 +25,15 @@ export function AnnouncementCentreModal({
   onClose: () => void;
 }) {
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <Screen>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="fullScreen"
+      onRequestClose={onClose}
+    >
+      <Screen style={styles.screen}>
         <View style={styles.header}>
-          <View>
+          <View style={styles.headerCopy}>
             <AppText variant="h2">What&apos;s new</AppText>
             <AppText variant="small" color={color.textSecondary}>
               Fresh updates and important Savvy news.
@@ -45,7 +50,11 @@ export function AnnouncementCentreModal({
           </Pressable>
         </View>
 
-        <ScrollView contentContainerStyle={styles.list}>
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.list}
+          showsVerticalScrollIndicator={false}
+        >
           {items.length === 0 ? (
             <View style={styles.empty}>
               <Ionicons name="megaphone-outline" size={24} color={color.textTertiary} />
@@ -94,14 +103,26 @@ export function AnnouncementCentreModal({
 }
 
 const styles = StyleSheet.create({
+  screen: { flex: 1, overflow: "hidden" },
   header: {
     flexDirection: "row",
     alignItems: "flex-start",
     justifyContent: "space-between",
     padding: space.lg,
+    gap: space.md,
   },
-  closeButton: { padding: space.xs },
-  list: { padding: space.lg, paddingTop: 0, gap: space.md },
+  headerCopy: { flex: 1, minWidth: 0 },
+  closeButton: {
+    width: 40,
+    height: 40,
+    flexShrink: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 20,
+    backgroundColor: color.surfaceMuted,
+  },
+  scroll: { flex: 1, width: "100%" },
+  list: { flexGrow: 1, width: "100%", padding: space.lg, paddingTop: 0, gap: space.md },
   card: {
     borderRadius: radius.lg,
     borderWidth: StyleSheet.hairlineWidth,
@@ -119,7 +140,13 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: color.primary,
   },
-  cardHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  cardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: space.sm,
+    paddingRight: space.md,
+  },
   cardTitle: { marginTop: space.xs },
   cardMessage: { lineHeight: 19 },
   ctaRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: space.xs },

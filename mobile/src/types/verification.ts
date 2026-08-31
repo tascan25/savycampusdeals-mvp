@@ -27,6 +27,7 @@ export type SubmitVerificationResult = {
   verification_method: "college_email" | "document_review";
   user: User;
   freshers_reward_unlocked: boolean;
+  already_submitted?: boolean;
 };
 
 /** Mirrors POST /api/auth/start-reverification. */

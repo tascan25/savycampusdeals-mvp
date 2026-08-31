@@ -17,6 +17,8 @@ import {
   readSession,
   saveSessionFromResponse,
 } from "@/services/session";
+import { getPushInstallationId } from "@/services/installation";
+import { unregisterNativePushToken } from "@/services/pushLifecycle";
 import type { User } from "@/types/user";
 
 type RegisterInput = Parameters<typeof apiRegister>[0];
@@ -85,14 +87,17 @@ export function AuthProvider({ children }: PropsWithChildren) {
     if (session) {
       // Best-effort: even if this fails (offline), still clear locally —
       // the session is gone for the user regardless of server ack.
-      await apiLogout(session.refreshToken).catch(() => undefined);
+      const installationId = await getPushInstallationId().catch(() => undefined);
+      await apiLogout(session.refreshToken, installationId).catch(() => undefined);
     }
+    await unregisterNativePushToken().catch(() => undefined);
     await endSession();
     setUser(null);
   }, []);
 
   const logoutAllDevices = useCallback(async () => {
     await apiLogoutAll().catch(() => undefined);
+    await unregisterNativePushToken().catch(() => undefined);
     await endSession();
     setUser(null);
   }, []);
@@ -109,6 +114,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   const deleteAccount = useCallback(async (password: string) => {
     await apiDeleteAccount(password, "DELETE");
+    await unregisterNativePushToken().catch(() => undefined);
     await endSession();
     setUser(null);
   }, []);
@@ -125,16 +131,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       updateProfile,
       deleteAccount,
     }),
-    [
-      user,
-      login,
-      register,
-      logout,
-      logoutAllDevices,
-      refreshUser,
-      updateProfile,
-      deleteAccount,
-    ],
+    [user, login, register, logout, logoutAllDevices, refreshUser, updateProfile, deleteAccount],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

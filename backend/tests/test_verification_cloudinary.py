@@ -366,6 +366,45 @@ def test_trusted_college_email_flow_does_not_upload(monkeypatch):
     assert "college_id_image_public_id" not in verifications.inserted
 
 
+def test_pending_submission_retry_is_idempotent(monkeypatch):
+    user = manual_user()
+    user["verification_status"] = "pending"
+    existing = {
+        "_id": ObjectId(),
+        "user_id": user["_id"],
+        "student_id_number": "UNIT-PENDING",
+        "student_id_normalized": "UNIT-PENDING",
+        "method": "document_review",
+        "status": "pending",
+    }
+
+    class ExistingVerification:
+        async def find_one(self, *args, **kwargs):
+            return existing
+
+    monkeypatch.setattr(
+        server,
+        "db",
+        SimpleNamespace(verifications=ExistingVerification()),
+    )
+    monkeypatch.setattr(
+        server,
+        "upload_verification_image",
+        lambda *a, **k: pytest.fail("a pending retry must not upload again"),
+    )
+
+    result = asyncio.run(
+        server.submit_verification(
+            submission(student_id_number="UNIT-PENDING"),
+            user=user,
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["already_submitted"] is True
+    assert result["user"]["verification_status"] == "pending"
+
+
 def test_missing_cloudinary_configuration_is_controlled(monkeypatch):
     user = manual_user()
     verifications, _ = install_fake_db(monkeypatch, user)

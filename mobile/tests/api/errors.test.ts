@@ -47,4 +47,18 @@ describe("toApiError", () => {
     expect(error.message).toBe("Something went wrong. Please try again.");
     expect(error.isNetworkError).toBe(false);
   });
+
+  it("preserves an error already normalized by the response interceptor", () => {
+    const normalized = new ApiError({
+      message: "A verification request already exists for this Student ID.",
+      status: 409,
+      requestId: "request-1",
+      isNetworkError: false,
+    });
+
+    expect(toApiError(normalized)).toBe(normalized);
+    expect(toApiError(normalized).message).toBe(
+      "A verification request already exists for this Student ID.",
+    );
+  });
 });

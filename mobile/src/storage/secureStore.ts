@@ -13,6 +13,8 @@ export const secureStorageKeys = {
   /** A device-level preference, not session data — deliberately excluded
    * from `clearSession()` so enabling app-lock survives logout/login. */
   appLockEnabled: "scd_app_lock_enabled",
+  /** Stable per-install identifier used to unregister only this phone. */
+  pushInstallationId: "scd_push_installation_id",
 } as const;
 
 const sessionKeys = [

@@ -25,7 +25,7 @@ const TESTIMONIALS = [
 ];
 
 const FAQS = [
-  { q: "Who can join SavyCampusDeals?", a: "Any Indian college student with a valid student ID card. Undergrad, PG, diploma — all welcome." },
+  { q: "Who can join Savvy Campus?", a: "Any Indian college student with a valid student ID card. Undergrad, PG, diploma — all welcome." },
   { q: "How does verification work?", a: "Upload your college ID plus a selfie. Our team reviews within 24 hours. Verified once — perks for a full year." },
   { q: "Is it really free?", a: "100%. Businesses pay us to give you the perks. Your job: enjoy them." },
   { q: "How do I redeem an offer?", a: "Every claim generates a unique QR-coded coupon. Show it at checkout — online or in-store." },
@@ -288,7 +288,7 @@ export default function Landing() {
             <div>
               <div className="text-[10px] uppercase tracking-[0.3em] text-emerald-400 flex items-center gap-2"><Utensils size={12}/> Around you</div>
               <h2 className="font-display text-4xl md:text-5xl font-extrabold tracking-tight mt-3">Local outlets, real perks.</h2>
-              <p className="text-zinc-400 mt-3 max-w-xl">Walk in with your Savy pass. Walk out with the discount. Deals at your favourite neighbourhood spots.</p>
+              <p className="text-zinc-400 mt-3 max-w-xl">Walk in with your Savvy pass. Walk out with the discount. Deals at your favourite neighbourhood spots.</p>
             </div>
             <Link to="/outlets" data-testid="landing-view-all-outlets" className="hidden md:inline-flex items-center gap-1 text-sm text-zinc-300 hover:text-white">All outlets <ArrowRight size={14}/></Link>
           </div>

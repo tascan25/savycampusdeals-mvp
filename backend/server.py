@@ -43,7 +43,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, EmailStr, Field
-from pymongo import ReturnDocument
+from pymongo import ReturnDocument, UpdateOne
 from pymongo.errors import BulkWriteError, DuplicateKeyError
 from services.cloudinary_service import (
     CloudinaryUploadError,
@@ -53,6 +53,7 @@ from services.cloudinary_service import (
     upload_verification_image,
     validate_verification_image,
 )
+from services.fcm_service import FcmConfigurationError, FcmSendError, FcmSender
 from utils.json_loader import load_data
 
 # -----------------------------
@@ -78,6 +79,12 @@ PUBLIC_API_URL = os.environ.get("PUBLIC_API_URL", FRONTEND_URL).rstrip("/")
 EMAIL_CAMPAIGN_RATE_PER_SECOND = max(
     1, min(20, int(os.environ.get("EMAIL_CAMPAIGN_RATE_PER_SECOND", "2")))
 )
+PUSH_ENV = os.environ.get("PUSH_ENV", "development").strip().lower()
+PUSH_ENABLED = os.environ.get("PUSH_ENABLED", "false").strip().lower() == "true"
+PUSH_WORKER_POLL_SECONDS = max(
+    1.0, min(60.0, float(os.environ.get("PUSH_WORKER_POLL_SECONDS", "5")))
+)
+PUSH_MAX_ATTEMPTS = max(1, min(10, int(os.environ.get("PUSH_MAX_ATTEMPTS", "5"))))
 BRAND_OFFER_DISCLAIMER = (
     "SavvyCampusDeals helps students discover this publicly available offer. "
     "Eligibility, verification, availability and fulfilment are managed by the "
@@ -113,7 +120,7 @@ client = AsyncIOMotorClient(
 )
 db = client[DB_NAME]
 
-app = FastAPI(title="SavyCampusDeals API")
+app = FastAPI(title="Savvy Campus Deals API")
 api = APIRouter(prefix="/api")
 
 
@@ -1013,7 +1020,7 @@ def validate_password(pw: str) -> None:
 
 
 def gen_ref_code(name: str) -> str:
-    stub = "".join(c for c in name.upper() if c.isalpha())[:4] or "SAVY"
+    stub = "".join(c for c in name.upper() if c.isalpha())[:4] or "SAVVY"
     return f"{stub}{secrets.token_hex(2).upper()}"
 
 
@@ -1052,12 +1059,41 @@ class MobileLoginIn(BaseModel):
     platform: Optional[Literal["ios", "android"]] = None
 
 
+class MobileAccountLookupIn(BaseModel):
+    email: EmailStr
+
+
 class MobileRefreshIn(BaseModel):
     refresh_token: str
 
 
 class MobileLogoutIn(BaseModel):
     refresh_token: str
+    installation_id: Optional[str] = Field(default=None, min_length=8, max_length=128)
+
+
+class PushDeviceIn(BaseModel):
+    token: str = Field(min_length=20, max_length=4096)
+    installation_id: str = Field(min_length=8, max_length=128)
+    platform: Literal["android", "ios"]
+    app_version: Optional[str] = Field(default="", max_length=40)
+    permission: Literal["granted", "provisional"] = "granted"
+
+
+class AdminPushCampaignIn(BaseModel):
+    title: str = Field(min_length=2, max_length=100)
+    message: str = Field(min_length=2, max_length=240)
+    audience: Literal["everyone", "students", "partners"] = "students"
+    channel: Literal["deals", "reminders", "account"] = "deals"
+    priority: Literal["normal", "high"] = "normal"
+    cta_url: Optional[str] = Field(default="", max_length=300)
+    image_url: Optional[str] = Field(default="", max_length=1000)
+    scheduled_at: Optional[datetime] = None
+
+
+class AdminPushCampaignLaunchIn(BaseModel):
+    recipient_count: int = Field(ge=0)
+    confirmation: Literal["SEND"]
 
 
 class ForgotIn(BaseModel):
@@ -2148,6 +2184,13 @@ async def mobile_login(body: MobileLoginIn, request: Request):
     return {"user": serialize_user(user), **session}
 
 
+@api.post("/auth/mobile/account-exists")
+async def mobile_account_exists(body: MobileAccountLookupIn):
+    email = body.email.lower().strip()
+    user = await db.users.find_one({"email": email})
+    return {"exists": user is not None}
+
+
 @api.post("/auth/mobile/refresh")
 async def mobile_refresh(body: MobileRefreshIn):
     now = datetime.now(timezone.utc)
@@ -2230,6 +2273,11 @@ async def mobile_refresh(body: MobileRefreshIn):
 async def mobile_logout(body: MobileLogoutIn):
     """Revoke this refresh token even when its access token has expired."""
     now = datetime.now(timezone.utc)
+    session = None
+    if body.installation_id:
+        session = await db.sessions.find_one(
+            {"refresh_token_hash": _hash_refresh_token(body.refresh_token)}
+        )
     await db.sessions.update_one(
         {
             "refresh_token_hash": _hash_refresh_token(body.refresh_token),
@@ -2237,6 +2285,15 @@ async def mobile_logout(body: MobileLogoutIn):
         },
         {"$set": {"revoked": True, "revoked_at": now, "revoked_reason": "logout"}},
     )
+    if session and body.installation_id:
+        await db.device_tokens.update_many(
+            {
+                "user_id": session["user_id"],
+                "installation_id": body.installation_id,
+                "environment": PUSH_ENV,
+            },
+            {"$set": {"active": False, "disabled_at": now, "disabled_reason": "logout"}},
+        )
     return {"ok": True}
 
 
@@ -2473,6 +2530,7 @@ async def delete_account(
         db.savvy_level_rewards,
         db.announcement_receipts,
         db.email_campaign_recipients,
+        db.push_deliveries,
         db.outlet_daily_redemptions,
         db.offer_monthly_redemptions,
         db.offer_once_redemptions,
@@ -2575,6 +2633,22 @@ async def submit_verification(
             409,
             "This Student ID / Roll Number has already been used for verification.",
         )
+    # A mobile upload can finish on the server just after the client loses its
+    # connection or reaches its timeout. Treat a retry of that user's already
+    # pending request as success instead of trapping them behind a 409.
+    if (
+        existing_id
+        and existing_id.get("user_id") == user["_id"]
+        and current_status == "pending"
+        and existing_id.get("status") == "pending"
+    ):
+        return {
+            "ok": True,
+            "verification_method": existing_id.get("method", "document_review"),
+            "user": serialize_user(user),
+            "freshers_reward_unlocked": False,
+            "already_submitted": True,
+        }
     reusable_verification = (
         existing_id
         if existing_id
@@ -3554,6 +3628,308 @@ def serialize_admin_verification(doc: dict, include_images: bool = False) -> dic
     return result
 
 
+PUSH_CAMPAIGN_AUDIENCES = {"everyone", "students", "partners"}
+PUSH_CHANNELS = {"deals", "reminders", "account"}
+PUSH_EDITABLE_STATUSES = {"draft", "cancelled"}
+_push_worker_task: Optional[asyncio.Task] = None
+_fcm_sender = FcmSender.from_environment()
+
+
+def _validated_push_campaign_payload(body: AdminPushCampaignIn) -> dict:
+    cta_url = (body.cta_url or "").strip()
+    if cta_url and not (cta_url.startswith("/") or cta_url.startswith("https://")):
+        raise HTTPException(400, "Notification destination must be a site path or HTTPS URL")
+    image_url = (body.image_url or "").strip()
+    if image_url and not image_url.startswith("https://"):
+        raise HTTPException(400, "Notification artwork must use HTTPS")
+    scheduled_at = _aware(body.scheduled_at) if body.scheduled_at else None
+    return {
+        "title": body.title.strip(),
+        "message": body.message.strip(),
+        "audience": body.audience,
+        "channel": body.channel,
+        "priority": body.priority,
+        "cta_url": cta_url,
+        "image_url": image_url,
+        "scheduled_at": scheduled_at,
+    }
+
+
+def serialize_push_campaign(campaign: dict) -> dict:
+    stats = campaign.get("stats") or {}
+    return {
+        "id": str(campaign["_id"]),
+        "title": campaign.get("title", ""),
+        "message": campaign.get("message", ""),
+        "audience": campaign.get("audience", "students"),
+        "channel": campaign.get("channel", "deals"),
+        "priority": campaign.get("priority", "normal"),
+        "cta_url": campaign.get("cta_url", ""),
+        "image_url": campaign.get("image_url", ""),
+        "status": campaign.get("status", "draft"),
+        "scheduled_at": _admin_datetime(campaign.get("scheduled_at")),
+        "queued_at": _admin_datetime(campaign.get("queued_at")),
+        "completed_at": _admin_datetime(campaign.get("completed_at")),
+        "cancelled_at": _admin_datetime(campaign.get("cancelled_at")),
+        "created_at": _admin_datetime(campaign.get("created_at")),
+        "updated_at": _admin_datetime(campaign.get("updated_at")),
+        "stats": {
+            "devices": int(stats.get("devices", 0)),
+            "pending": int(stats.get("pending", 0)),
+            "accepted": int(stats.get("accepted", 0)),
+            "failed": int(stats.get("failed", 0)),
+            "opened": int(stats.get("opened", 0)),
+        },
+    }
+
+
+def _push_audience_user_query(audience: str) -> dict:
+    if audience == "students":
+        return {"role": "student"}
+    if audience == "partners":
+        return {"role": "outlet_partner", "active": {"$ne": False}}
+    if audience == "everyone":
+        return {
+            "$or": [
+                {"role": "student"},
+                {"role": "outlet_partner", "active": {"$ne": False}},
+            ]
+        }
+    raise HTTPException(400, "Invalid notification audience")
+
+
+async def _eligible_push_devices(audience: str) -> list[dict]:
+    user_ids = await db.users.distinct("_id", _push_audience_user_query(audience))
+    if not user_ids:
+        return []
+    devices = await db.device_tokens.find(
+        {
+            "user_id": {"$in": user_ids},
+            "environment": PUSH_ENV,
+            "platform": "android",
+            "active": True,
+        }
+    ).to_list(None)
+    # A token is globally unique, but keeping this defensive de-duplication here
+    # also protects audience counts while old records are being migrated.
+    return list({device["token"]: device for device in devices}.values())
+
+
+async def _push_audience_counts(audience: str) -> dict:
+    devices = await _eligible_push_devices(audience)
+    return {
+        "audience": audience,
+        "users": len({device["user_id"] for device in devices}),
+        "devices": len(devices),
+        "environment": PUSH_ENV,
+    }
+
+
+async def _materialize_push_campaign(campaign_id: ObjectId) -> None:
+    campaign = await db.push_campaigns.find_one({"_id": campaign_id})
+    if not campaign or campaign.get("status") not in {"preparing", "scheduled"}:
+        return
+    now = datetime.now(timezone.utc)
+    await db.push_campaigns.update_one(
+        {"_id": campaign_id, "status": {"$in": ["preparing", "scheduled"]}},
+        {"$set": {"status": "preparing", "updated_at": now}},
+    )
+    devices = await _eligible_push_devices(campaign["audience"])
+    if devices:
+        operations = [
+            UpdateOne(
+                {"campaign_id": campaign_id, "token": device["token"]},
+                {
+                    "$setOnInsert": {
+                        "campaign_id": campaign_id,
+                        "user_id": device["user_id"],
+                        "device_token_id": device["_id"],
+                        "installation_id": device.get("installation_id", ""),
+                        "token": device["token"],
+                        "platform": device.get("platform", "android"),
+                        "status": "pending",
+                        "attempts": 0,
+                        "created_at": now,
+                        "next_attempt_at": now,
+                    }
+                },
+                upsert=True,
+            )
+            for device in devices
+        ]
+        try:
+            await db.push_deliveries.bulk_write(operations, ordered=False)
+        except BulkWriteError:
+            # The compound unique index makes restarts idempotent; a duplicate
+            # discovered during a concurrent resume is already the desired row.
+            logger.info("Push campaign %s was materialized concurrently", campaign_id)
+
+    status_counts = {}
+    for status in ("pending", "retry", "sending", "accepted", "failed"):
+        status_counts[status] = await db.push_deliveries.count_documents(
+            {"campaign_id": campaign_id, "status": status}
+        )
+    pending = status_counts["pending"] + status_counts["retry"] + status_counts["sending"]
+    devices_count = sum(status_counts.values())
+    updates = {
+        "status": "sending" if pending else "completed",
+        "queued_at": campaign.get("queued_at") or now,
+        "updated_at": now,
+        "stats": {
+            "devices": devices_count,
+            "pending": pending,
+            "accepted": status_counts["accepted"],
+            "failed": status_counts["failed"],
+            "opened": int((campaign.get("stats") or {}).get("opened", 0)),
+        },
+    }
+    if not pending:
+        updates["completed_at"] = now
+    await db.push_campaigns.update_one({"_id": campaign_id}, {"$set": updates})
+
+
+async def _finish_push_delivery(delivery: dict) -> None:
+    campaign = await db.push_campaigns.find_one({"_id": delivery["campaign_id"]})
+    if not campaign:
+        await db.push_deliveries.update_one(
+            {"_id": delivery["_id"]},
+            {"$set": {"status": "failed", "last_error": "Campaign no longer exists"}},
+        )
+        return
+    try:
+        provider_message_id = await _fcm_sender.send(
+            token=delivery["token"],
+            title=campaign["title"],
+            body=campaign["message"],
+            channel_id=campaign.get("channel", "deals"),
+            priority=campaign.get("priority", "normal"),
+            image_url=campaign.get("image_url", ""),
+            data={
+                "kind": "push_campaign",
+                "campaign_id": str(campaign["_id"]),
+                "delivery_id": str(delivery["_id"]),
+                "route": campaign.get("cta_url", ""),
+            },
+        )
+        now = datetime.now(timezone.utc)
+        await db.push_deliveries.update_one(
+            {"_id": delivery["_id"]},
+            {
+                "$set": {
+                    "status": "accepted",
+                    "accepted_at": now,
+                    "provider_message_id": provider_message_id,
+                    "last_error": "",
+                },
+                "$inc": {"attempts": 1},
+            },
+        )
+        await db.push_campaigns.update_one(
+            {"_id": campaign["_id"]},
+            {"$inc": {"stats.pending": -1, "stats.accepted": 1}, "$set": {"updated_at": now}},
+        )
+    except FcmConfigurationError as exc:
+        logger.error("Push configuration error: %s", exc)
+        await db.push_deliveries.update_one(
+            {"_id": delivery["_id"]},
+            {
+                "$set": {
+                    "status": "retry",
+                    "last_error": "Push provider is not configured",
+                    "next_attempt_at": datetime.now(timezone.utc) + timedelta(minutes=5),
+                }
+            },
+        )
+        return
+    except FcmSendError as exc:
+        attempts = int(delivery.get("attempts", 0)) + 1
+        retry = exc.transient and attempts < PUSH_MAX_ATTEMPTS
+        now = datetime.now(timezone.utc)
+        delivery_updates = {
+            "status": "retry" if retry else "failed",
+            "last_error": str(exc)[:500],
+            "provider_error_code": exc.code,
+            "attempts": attempts,
+            "last_attempt_at": now,
+        }
+        if retry:
+            delivery_updates["next_attempt_at"] = now + timedelta(
+                seconds=min(900, 2 ** attempts * 5)
+            )
+        else:
+            delivery_updates["failed_at"] = now
+        await db.push_deliveries.update_one(
+            {"_id": delivery["_id"]}, {"$set": delivery_updates}
+        )
+        if exc.invalid_token:
+            await db.device_tokens.update_many(
+                {"token": delivery["token"]},
+                {
+                    "$set": {
+                        "active": False,
+                        "disabled_at": now,
+                        "disabled_reason": exc.code,
+                    }
+                },
+            )
+        if not retry:
+            await db.push_campaigns.update_one(
+                {"_id": campaign["_id"]},
+                {"$inc": {"stats.pending": -1, "stats.failed": 1}, "$set": {"updated_at": now}},
+            )
+
+    remaining = await db.push_deliveries.count_documents(
+        {
+            "campaign_id": campaign["_id"],
+            "status": {"$in": ["pending", "retry", "sending"]},
+        }
+    )
+    if not remaining:
+        now = datetime.now(timezone.utc)
+        await db.push_campaigns.update_one(
+            {"_id": campaign["_id"], "status": "sending"},
+            {"$set": {"status": "completed", "completed_at": now, "updated_at": now}},
+        )
+
+
+async def _push_job_worker() -> None:
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            due_campaign = await db.push_campaigns.find_one_and_update(
+                {
+                    "status": {"$in": ["scheduled", "preparing"]},
+                    "$or": [
+                        {"scheduled_at": {"$lte": now}},
+                        {"scheduled_at": None},
+                    ],
+                },
+                {"$set": {"status": "preparing", "updated_at": now}},
+                sort=[("scheduled_at", 1), ("created_at", 1)],
+                return_document=ReturnDocument.AFTER,
+            )
+            if due_campaign:
+                await _materialize_push_campaign(due_campaign["_id"])
+                continue
+            delivery = await db.push_deliveries.find_one_and_update(
+                {
+                    "status": {"$in": ["pending", "retry"]},
+                    "next_attempt_at": {"$lte": now},
+                },
+                {"$set": {"status": "sending", "last_attempt_at": now}},
+                sort=[("next_attempt_at", 1), ("created_at", 1)],
+                return_document=ReturnDocument.AFTER,
+            )
+            if delivery:
+                await _finish_push_delivery(delivery)
+                continue
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Push notification worker failed")
+        await asyncio.sleep(PUSH_WORKER_POLL_SECONDS)
+
+
 ANNOUNCEMENT_CATEGORIES = {"new", "important", "limited"}
 ANNOUNCEMENT_AUDIENCES = {"everyone", "students", "partners"}
 ANNOUNCEMENT_LIFETIME_DAYS = 5
@@ -4051,6 +4427,243 @@ async def admin_dashboard(admin=Depends(get_admin_user)):
         "outlet_partners": partners,
         "outlet_redemptions": redeemed,
     }
+
+
+@api.post("/push/devices")
+async def register_push_device(body: PushDeviceIn, user=Depends(get_current_user)):
+    if user.get("role") not in {"student", "outlet_partner"}:
+        raise HTTPException(403, "Push notifications are not available for this account")
+    now = datetime.now(timezone.utc)
+    # One installation can rotate tokens. Disable its old token before the
+    # globally unique token is reassigned/upserted to the current account.
+    await db.device_tokens.update_many(
+        {
+            "user_id": user["_id"],
+            "installation_id": body.installation_id,
+            "environment": PUSH_ENV,
+            "token": {"$ne": body.token},
+            "active": True,
+        },
+        {
+            "$set": {
+                "active": False,
+                "disabled_at": now,
+                "disabled_reason": "token_rotated",
+            }
+        },
+    )
+    await db.device_tokens.update_one(
+        {"token": body.token},
+        {
+            "$set": {
+                "user_id": user["_id"],
+                "installation_id": body.installation_id,
+                "platform": body.platform,
+                "environment": PUSH_ENV,
+                "app_version": body.app_version or "",
+                "permission": body.permission,
+                "active": True,
+                "last_seen_at": now,
+                "disabled_at": None,
+                "disabled_reason": "",
+            },
+            "$setOnInsert": {"created_at": now},
+        },
+        upsert=True,
+    )
+    return {"ok": True, "environment": PUSH_ENV}
+
+
+@api.delete("/push/devices/{installation_id}")
+async def unregister_push_device(installation_id: str, user=Depends(get_current_user)):
+    if not 8 <= len(installation_id) <= 128:
+        raise HTTPException(400, "Invalid installation identifier")
+    now = datetime.now(timezone.utc)
+    await db.device_tokens.update_many(
+        {
+            "user_id": user["_id"],
+            "installation_id": installation_id,
+            "environment": PUSH_ENV,
+        },
+        {
+            "$set": {
+                "active": False,
+                "disabled_at": now,
+                "disabled_reason": "unregistered",
+            }
+        },
+    )
+    return {"ok": True}
+
+
+@api.post("/push/deliveries/{delivery_id}/opened")
+async def mark_push_delivery_opened(delivery_id: str, user=Depends(get_current_user)):
+    try:
+        delivery_oid = ObjectId(delivery_id)
+    except Exception:
+        return {"ok": True}
+    now = datetime.now(timezone.utc)
+    delivery = await db.push_deliveries.find_one_and_update(
+        {"_id": delivery_oid, "user_id": user["_id"], "opened_at": {"$exists": False}},
+        {"$set": {"opened_at": now}},
+        return_document=ReturnDocument.BEFORE,
+    )
+    if delivery:
+        await db.push_campaigns.update_one(
+            {"_id": delivery["campaign_id"]},
+            {"$inc": {"stats.opened": 1}, "$set": {"updated_at": now}},
+        )
+    return {"ok": True}
+
+
+@api.get("/admin/push-campaigns/audience-count")
+async def admin_push_audience_count(
+    audience: str = Query("students", max_length=20),
+    admin=Depends(get_admin_user),
+):
+    return await _push_audience_counts(audience)
+
+
+@api.get("/admin/push-campaigns")
+async def admin_push_campaigns(admin=Depends(get_admin_user)):
+    campaigns = await db.push_campaigns.find({}).sort("created_at", -1).to_list(200)
+    return {
+        "items": [serialize_push_campaign(campaign) for campaign in campaigns],
+        "push_enabled": PUSH_ENABLED,
+        "provider_configured": _fcm_sender.configured,
+        "environment": PUSH_ENV,
+    }
+
+
+@api.post("/admin/push-campaigns")
+async def admin_create_push_campaign(
+    body: AdminPushCampaignIn, admin=Depends(get_admin_user)
+):
+    now = datetime.now(timezone.utc)
+    campaign = {
+        **_validated_push_campaign_payload(body),
+        "status": "draft",
+        "stats": {"devices": 0, "pending": 0, "accepted": 0, "failed": 0, "opened": 0},
+        "created_at": now,
+        "updated_at": now,
+        "created_by": admin["_id"],
+    }
+    result = await db.push_campaigns.insert_one(campaign)
+    campaign["_id"] = result.inserted_id
+    return serialize_push_campaign(campaign)
+
+
+@api.put("/admin/push-campaigns/{campaign_id}")
+async def admin_update_push_campaign(
+    campaign_id: str,
+    body: AdminPushCampaignIn,
+    admin=Depends(get_admin_user),
+):
+    try:
+        campaign_oid = ObjectId(campaign_id)
+    except Exception:
+        raise HTTPException(404, "Push campaign not found")
+    campaign = await db.push_campaigns.find_one({"_id": campaign_oid})
+    if not campaign:
+        raise HTTPException(404, "Push campaign not found")
+    if campaign.get("status") not in PUSH_EDITABLE_STATUSES:
+        raise HTTPException(409, "A scheduled or sent notification can no longer be edited")
+    updates = {
+        **_validated_push_campaign_payload(body),
+        "status": "draft",
+        "updated_at": datetime.now(timezone.utc),
+        "updated_by": admin["_id"],
+    }
+    await db.push_campaigns.update_one({"_id": campaign_oid}, {"$set": updates})
+    fresh = await db.push_campaigns.find_one({"_id": campaign_oid})
+    return serialize_push_campaign(fresh)
+
+
+@api.post("/admin/push-campaigns/{campaign_id}/queue")
+async def admin_queue_push_campaign(
+    campaign_id: str,
+    body: AdminPushCampaignLaunchIn,
+    admin=Depends(get_admin_user),
+):
+    if not PUSH_ENABLED or not _fcm_sender.configured:
+        raise HTTPException(503, "Production push delivery is not configured")
+    try:
+        campaign_oid = ObjectId(campaign_id)
+    except Exception:
+        raise HTTPException(404, "Push campaign not found")
+    campaign = await db.push_campaigns.find_one({"_id": campaign_oid})
+    if not campaign:
+        raise HTTPException(404, "Push campaign not found")
+    if campaign.get("status") != "draft":
+        raise HTTPException(409, "This notification has already been scheduled or sent")
+    counts = await _push_audience_counts(campaign["audience"])
+    if not counts["devices"]:
+        raise HTTPException(409, "This audience has no registered Android devices")
+    if counts["devices"] != body.recipient_count:
+        raise HTTPException(
+            409,
+            f"Audience changed from {body.recipient_count} to {counts['devices']} devices; review it again",
+        )
+    now = datetime.now(timezone.utc)
+    scheduled_at = _aware(campaign.get("scheduled_at"))
+    status = "scheduled" if scheduled_at and scheduled_at > now else "preparing"
+    result = await db.push_campaigns.update_one(
+        {"_id": campaign_oid, "status": "draft"},
+        {
+            "$set": {
+                "status": status,
+                "queued_at": now,
+                "updated_at": now,
+                "queued_by": admin["_id"],
+                "confirmed_device_count": counts["devices"],
+            }
+        },
+    )
+    if not result.modified_count:
+        raise HTTPException(409, "This notification was queued by another request")
+    if status == "preparing":
+        await _materialize_push_campaign(campaign_oid)
+    fresh = await db.push_campaigns.find_one({"_id": campaign_oid})
+    return serialize_push_campaign(fresh)
+
+
+@api.post("/admin/push-campaigns/{campaign_id}/cancel")
+async def admin_cancel_push_campaign(campaign_id: str, admin=Depends(get_admin_user)):
+    try:
+        campaign_oid = ObjectId(campaign_id)
+    except Exception:
+        raise HTTPException(404, "Push campaign not found")
+    now = datetime.now(timezone.utc)
+    result = await db.push_campaigns.update_one(
+        {"_id": campaign_oid, "status": "scheduled"},
+        {
+            "$set": {
+                "status": "cancelled",
+                "cancelled_at": now,
+                "updated_at": now,
+                "cancelled_by": admin["_id"],
+            }
+        },
+    )
+    if not result.modified_count:
+        raise HTTPException(409, "Only a scheduled notification can be cancelled")
+    fresh = await db.push_campaigns.find_one({"_id": campaign_oid})
+    return serialize_push_campaign(fresh)
+
+
+@api.delete("/admin/push-campaigns/{campaign_id}")
+async def admin_delete_push_campaign(campaign_id: str, admin=Depends(get_admin_user)):
+    try:
+        campaign_oid = ObjectId(campaign_id)
+    except Exception:
+        raise HTTPException(404, "Push campaign not found")
+    result = await db.push_campaigns.delete_one(
+        {"_id": campaign_oid, "status": {"$in": list(PUSH_EDITABLE_STATUSES)}}
+    )
+    if not result.deleted_count:
+        raise HTTPException(409, "Only draft or cancelled notifications can be deleted")
+    await db.push_deliveries.delete_many({"campaign_id": campaign_oid})
+    return {"ok": True}
 
 
 @api.get("/announcements")
@@ -6854,7 +7467,7 @@ async def claim_offer(offer_id: str, user=Depends(get_verified_user)):
     now = datetime.now(timezone.utc)
     outlet_oid = offer.get("outlet_id")
 
-    # Listed online offers are discovery links, not Savy-issued coupons. Keep
+    # Listed online offers are discovery links, not Savvy-issued coupons. Keep
     # this branch before every coupon/QR operation so outlet behavior remains
     # byte-for-byte compatible below.
     if not outlet_oid:
@@ -8545,6 +9158,20 @@ async def on_startup():
         await db.sessions.create_index("expires_at", expireAfterSeconds=0)
         await db.device_tokens.create_index([("user_id", 1)])
         await db.device_tokens.create_index("token", unique=True)
+        await db.device_tokens.create_index(
+            [("environment", 1), ("active", 1), ("user_id", 1)]
+        )
+        await db.device_tokens.create_index(
+            [("user_id", 1), ("installation_id", 1), ("environment", 1)]
+        )
+        await db.push_campaigns.create_index([("status", 1), ("scheduled_at", 1)])
+        await db.push_deliveries.create_index(
+            [("campaign_id", 1), ("token", 1)], unique=True
+        )
+        await db.push_deliveries.create_index(
+            [("status", 1), ("next_attempt_at", 1), ("created_at", 1)]
+        )
+        await db.push_deliveries.create_index([("user_id", 1), ("opened_at", 1)])
     except Exception as e:
         logger.warning(f"Index warn: {e}")
     await db.users.update_many(
@@ -8597,6 +9224,19 @@ async def on_startup():
     )
     global _freshers_worker_task
     _freshers_worker_task = asyncio.create_task(_freshers_job_worker())
+    global _push_worker_task
+    if PUSH_ENABLED:
+        if not _fcm_sender.configured:
+            logger.error(
+                "PUSH_ENABLED is true but FCM_PROJECT_ID/service-account credentials are missing"
+            )
+        else:
+            push_now = datetime.now(timezone.utc)
+            await db.push_deliveries.update_many(
+                {"status": "sending"},
+                {"$set": {"status": "retry", "next_attempt_at": push_now}},
+            )
+            _push_worker_task = asyncio.create_task(_push_job_worker())
     # Resume durable campaign jobs after a process restart. Any recipient left in
     # the transient sending state is safe to claim again from its persisted row.
     try:
@@ -8665,6 +9305,9 @@ app.add_middleware(
 
 @app.on_event("shutdown")
 async def shutdown():
+    if _push_worker_task:
+        _push_worker_task.cancel()
+        await asyncio.gather(_push_worker_task, return_exceptions=True)
     if _freshers_worker_task:
         _freshers_worker_task.cancel()
         await asyncio.gather(_freshers_worker_task, return_exceptions=True)

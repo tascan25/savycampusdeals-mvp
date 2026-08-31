@@ -85,13 +85,17 @@ export default function Signup() {
   const pwScore = passwordScore(f.password);
   const confirmTouched = f.confirm_password.length > 0;
   const confirmMatches = confirmTouched && f.confirm_password === f.password;
-  const canSubmit = pwValid && confirmMatches;
+  const accountDetailsValid = f.name.trim().length >= 2 && Boolean(f.email.trim());
+  const academicDetailsValid = f.college.trim().length >= 2 && f.course.trim().length >= 2 && Boolean(f.year.trim());
+  const canSubmit = accountDetailsValid && pwValid && confirmMatches && academicDetailsValid;
 
   const onSubmit = async (e) => {
     e.preventDefault();
     setErr("");
+    if (!accountDetailsValid) { setErr("Enter your full name and a valid email address."); return; }
     if (!pwValid) { setErr("Please meet all password requirements."); return; }
     if (!confirmMatches) { setErr("Passwords do not match."); return; }
+    if (!academicDetailsValid) { setErr("College, course and year of study are required."); return; }
     setLoading(true);
     // Strip confirm_password before sending
     const { confirm_password, ...payload } = f;
@@ -236,14 +240,15 @@ export default function Signup() {
           </div>
 
           {[
-            { k: "college", label: "College", type: "text" },
-            { k: "course", label: "Course", type: "text" },
+            { k: "college", label: "College", type: "text", required: true },
+            { k: "course", label: "Course", type: "text", required: true },
             {
               k: "year",
               label: "Year of study",
               type: "text",
               placeholder: "e.g. 1st year",
               helper: "Enter as 1st year, 2nd year, 3rd year, etc.",
+              required: true,
             },
             { k: "referral_code", label: "Referral code (optional)", type: "text" },
           ].map((field) => (
@@ -252,6 +257,7 @@ export default function Signup() {
               <input
                 data-testid={`signup-${field.k}-input`}
                 type={field.type}
+                required={field.required}
                 placeholder={field.placeholder}
                 value={f[field.k]}
                 onChange={update(field.k)}

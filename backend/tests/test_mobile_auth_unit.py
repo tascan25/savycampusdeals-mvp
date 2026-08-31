@@ -184,6 +184,25 @@ def test_mobile_login_issues_session_and_rejects_wrong_password(monkeypatch):
     assert exc.value.status_code == 401
 
 
+def test_mobile_account_exists_normalizes_email_and_reports_missing(monkeypatch):
+    user = _student()
+    monkeypatch.setattr(server, "db", SimpleNamespace(users=FakeUsers([user])))
+
+    found = asyncio.run(
+        server.mobile_account_exists(
+            server.MobileAccountLookupIn(email="STUDENT@example.com")
+        )
+    )
+    missing = asyncio.run(
+        server.mobile_account_exists(
+            server.MobileAccountLookupIn(email="missing@example.com")
+        )
+    )
+
+    assert found == {"exists": True}
+    assert missing == {"exists": False}
+
+
 def test_mobile_refresh_rotates_token_and_keeps_family(monkeypatch):
     user = _student()
     sessions = FakeSessions()

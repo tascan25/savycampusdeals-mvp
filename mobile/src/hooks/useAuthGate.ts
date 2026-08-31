@@ -13,10 +13,14 @@ export function getAuthGateDecision(
   const inAuthGroup = segments[0] === "(auth)";
   const authScreen = inAuthGroup ? segments[1] : undefined;
   if (!user) return inAuthGroup ? null : "login";
-  if (user.role === "student" && !user.email_verified && authScreen !== "verify-otp") {
+  if (
+    user.role === "student" &&
+    !user.email_verified &&
+    (authScreen === "register" || authScreen === "login-password")
+  ) {
     return "otp";
   }
-  if ((user.role !== "student" || user.email_verified) && inAuthGroup && authScreen !== "verify-otp") {
+  if (inAuthGroup && authScreen !== "verify-otp") {
     return "tabs";
   }
   return null;

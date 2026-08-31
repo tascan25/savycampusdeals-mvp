@@ -47,12 +47,22 @@ export function VerificationImagePicker({
       </AppText>
       <View style={styles.preview}>
         {value ? (
-          <Image source={{ uri: value }} style={styles.image} resizeMode="cover" />
+          <>
+            <Image source={{ uri: value }} style={styles.image} resizeMode="cover" />
+            <View style={styles.selectedBadge}>
+              <Ionicons name="checkmark-circle" size={15} color="#86EFAC" />
+              <AppText variant="caption" color="#DCFCE7" style={styles.selectedLabel}>
+                Photo added
+              </AppText>
+            </View>
+          </>
         ) : (
           <View style={styles.placeholder}>
-            <Ionicons name="image-outline" size={28} color={color.textTertiary} />
-            <AppText variant="caption" color={color.textTertiary}>
-              No image selected
+            <View style={styles.placeholderIcon}>
+              <Ionicons name="image-outline" size={24} color="#C4B5FD" />
+            </View>
+            <AppText variant="small" color={color.textSecondary}>
+              Add a clear, well-lit photo
             </AppText>
           </View>
         )}
@@ -64,8 +74,10 @@ export function VerificationImagePicker({
           accessibilityLabel={`Take a photo for ${label}`}
           style={({ pressed }) => [styles.actionButton, pressed && styles.pressed]}
         >
-          <Ionicons name="camera" size={16} color={color.textPrimary} />
-          <AppText variant="small">Camera</AppText>
+          <Ionicons name="camera-outline" size={17} color="#C4B5FD" />
+          <AppText variant="small" color="#DDD6FE" style={styles.actionLabel}>
+            Take photo
+          </AppText>
         </Pressable>
         <Pressable
           onPress={() => runPick(pickFromLibrary)}
@@ -73,8 +85,10 @@ export function VerificationImagePicker({
           accessibilityLabel={`Choose a photo for ${label}`}
           style={({ pressed }) => [styles.actionButton, pressed && styles.pressed]}
         >
-          <Ionicons name="images" size={16} color={color.textPrimary} />
-          <AppText variant="small">Gallery</AppText>
+          <Ionicons name="images-outline" size={17} color="#C4B5FD" />
+          <AppText variant="small" color="#DDD6FE" style={styles.actionLabel}>
+            Choose photo
+          </AppText>
         </Pressable>
       </View>
       {error ? (
@@ -88,17 +102,40 @@ export function VerificationImagePicker({
 
 const styles = StyleSheet.create({
   container: { gap: space.sm },
-  label: { textTransform: "uppercase", letterSpacing: 0.4 },
+  label: { fontWeight: "700" },
   preview: {
-    aspectRatio: 4 / 3,
+    height: 154,
     borderRadius: radius.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: color.border,
-    backgroundColor: color.surface,
+    borderWidth: 1,
+    borderColor: "rgba(167,139,250,0.18)",
+    backgroundColor: "rgba(16,16,22,0.92)",
     overflow: "hidden",
   },
   image: { width: "100%", height: "100%" },
-  placeholder: { flex: 1, alignItems: "center", justifyContent: "center", gap: space.xs },
+  placeholder: { flex: 1, alignItems: "center", justifyContent: "center", gap: space.sm },
+  placeholderIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(196,181,253,0.25)",
+    backgroundColor: "rgba(124,58,237,0.12)",
+  },
+  selectedBadge: {
+    position: "absolute",
+    left: space.sm,
+    bottom: space.sm,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderRadius: radius.pill,
+    backgroundColor: "rgba(5,20,12,0.88)",
+  },
+  selectedLabel: { fontWeight: "800" },
   actions: { flexDirection: "row", gap: space.sm },
   actionButton: {
     flex: 1,
@@ -109,8 +146,9 @@ const styles = StyleSheet.create({
     minHeight: minTouchTarget,
     borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: color.border,
-    backgroundColor: color.surfaceElevated,
+    borderColor: "rgba(167,139,250,0.20)",
+    backgroundColor: "rgba(124,58,237,0.09)",
   },
+  actionLabel: { fontWeight: "700" },
   pressed: { opacity: 0.85 },
 });

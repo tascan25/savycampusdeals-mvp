@@ -76,6 +76,7 @@ def fake_db(*, verification_rows=None):
         "savvy_level_rewards",
         "announcement_receipts",
         "email_campaign_recipients",
+        "push_deliveries",
         "outlet_daily_redemptions",
         "offer_monthly_redemptions",
         "offer_once_redemptions",

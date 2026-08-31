@@ -13,6 +13,8 @@ const URL_SCHEME = process.env.EXPO_PUBLIC_URL_SCHEME ?? "savvycampus";
 const ANDROID_PACKAGE = process.env.EXPO_PUBLIC_ANDROID_PACKAGE ?? "in.savvycampus.app";
 const IOS_BUNDLE_ID = process.env.EXPO_PUBLIC_IOS_BUNDLE_ID ?? "in.savvycampus.app";
 const PRODUCTION_DOMAIN = process.env.EXPO_PUBLIC_PRODUCTION_DOMAIN ?? "savvycampus.app";
+const APP_ENV = process.env.EXPO_PUBLIC_APP_ENV ?? "development";
+const GOOGLE_SERVICES_FILE = process.env.GOOGLE_SERVICES_FILE;
 /**
  * iOS's Associated Domains (Universal Links) capability isn't provisionable
  * on a free personal Apple account — Xcode fails signing entirely with it
@@ -30,6 +32,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   scheme: URL_SCHEME,
   version: "0.1.0",
   orientation: "portrait",
+  icon: "./assets/icon.png",
   userInterfaceStyle: "dark",
   backgroundColor: "#050505",
   splash: {
@@ -44,6 +47,15 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   plugins: [
     ...(config.plugins ?? []),
     "expo-asset",
+    ...(APP_ENV !== "production" ? ["./plugins/withDevCleartextTraffic"] : []),
+    [
+      "./plugins/withAndroidNotifications",
+      {
+        icon: "./assets/android-icon-monochrome.png",
+        color: "#4F46E5",
+        defaultChannel: "deals",
+      },
+    ],
     [
       "expo-splash-screen",
       {
@@ -74,6 +86,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ],
   ios: {
     ...config.ios,
+    icon: "./assets/icon.png",
     bundleIdentifier: IOS_BUNDLE_ID,
     supportsTablet: true,
     ...(ENABLE_ASSOCIATED_DOMAINS
@@ -92,8 +105,15 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     },
   },
   android: {
+    versionCode:1,
     ...config.android,
+    icon: "./assets/icon.png",
     package: ANDROID_PACKAGE,
+    ...(GOOGLE_SERVICES_FILE ? { googleServicesFile: GOOGLE_SERVICES_FILE } : null),
+    adaptiveIcon: {
+      backgroundColor: "#FFFFFF",
+      foregroundImage: "./assets/android-icon-foreground.png",
+    },
     intentFilters: [
       {
         action: "VIEW",
@@ -105,6 +125,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   extra: {
     ...config.extra,
-    appEnv: process.env.EXPO_PUBLIC_APP_ENV ?? "development",
+    appEnv: APP_ENV,
   },
 });

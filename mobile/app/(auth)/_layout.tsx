@@ -8,6 +8,7 @@ export default function AuthLayout() {
       screenOptions={{ headerShown: false, contentStyle: { backgroundColor: color.background } }}
     >
       <Stack.Screen name="login" />
+      <Stack.Screen name="login-password" />
       <Stack.Screen name="register" />
       <Stack.Screen name="verify-otp" />
       <Stack.Screen name="forgot-password" />

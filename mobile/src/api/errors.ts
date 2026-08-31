@@ -48,6 +48,11 @@ function formatDetail(detail: unknown): string {
 }
 
 export function toApiError(error: unknown): ApiError {
+  // The Axios response interceptor already normalizes errors before callers
+  // receive them. Keep normalization idempotent so screen-level handlers do
+  // not replace the useful backend message with the generic fallback.
+  if (error instanceof ApiError) return error;
+
   if (isAxiosError(error)) {
     const requestId = (error.response?.headers?.["x-request-id"] as string | undefined) ?? null;
 
@@ -56,7 +61,7 @@ export function toApiError(error: unknown): ApiError {
         message:
           error.code === "ECONNABORTED"
             ? "That took too long. Check your connection and try again."
-            : "You appear to be offline. Check your connection and try again.",
+            : "Couldn't reach the Savvy Campus server. Check your connection and try again.",
         status: null,
         requestId,
         isNetworkError: true,

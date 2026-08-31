@@ -159,7 +159,7 @@ def test_verification_optional_images_auto_approves():
     assert body["user"]["student_number"].startswith("SCD-")
 
 
-# ---------- Brand offer claim returns an official link, never a Savy coupon ----------
+# ---------- Brand offer claim returns an official link, never a Savvy coupon ----------
 def test_brand_offer_claim_succeeds_after_full_verification():
     email = _uniq_email()
     token = _register_and_login(email)

@@ -99,7 +99,7 @@ function AdminSidebar({ pathname, onNavigate, mobileOpen }) {
   return <aside className={`${mobileOpen ? "block" : "hidden"} w-full md:block md:w-64 shrink-0 md:min-h-screen border-b md:border-b-0 md:border-r border-white/10 bg-[#09090b] p-4 md:sticky md:top-0`}>
     <div className="flex items-center gap-3 px-2 py-3">
       <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 grid place-items-center"><ShieldCheck size={19} /></div>
-      <div><div className="font-display font-bold">Savy Admin</div><div className="text-[10px] uppercase tracking-[0.18em] text-indigo-300">Control centre</div></div>
+      <div><div className="font-display font-bold">Savvy Admin</div><div className="text-[10px] uppercase tracking-[0.18em] text-indigo-300">Control centre</div></div>
     </div>
     <nav className="mt-5 flex md:flex-col gap-1 overflow-x-auto pb-1">
       {navItems.map((item) => <Link key={item.to} to={item.to} onClick={onNavigate} className={`whitespace-nowrap flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors ${active(item.to) ? "bg-indigo-500/15 text-indigo-100" : "text-zinc-400 hover:bg-white/5 hover:text-white"}`}>
@@ -119,7 +119,7 @@ function DashboardPage() {
     ["today_signups", "Today's signups", CircleUserRound, "text-sky-300"], ["total_brands", "Total brands", Store, "text-violet-300"],
     ["outlet_partners", "Active outlet partners", Handshake, "text-cyan-300"], ["outlet_redemptions", "Outlet redemptions", TicketCheck, "text-emerald-300"],
   ];
-  return <><div><p className="text-xs uppercase tracking-[0.25em] text-indigo-300">Administration</p><h1 className="font-display mt-2 text-3xl font-extrabold">Dashboard</h1><p className="mt-2 text-sm text-zinc-400">A live overview of SavyCampusDeals.</p></div>
+  return <><div><p className="text-xs uppercase tracking-[0.25em] text-indigo-300">Administration</p><h1 className="font-display mt-2 text-3xl font-extrabold">Dashboard</h1><p className="mt-2 text-sm text-zinc-400">A live overview of Savvy Campus Deals.</p></div>
     <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
       {cards.map(([key, label, Icon, tint]) => <div key={key} className="rounded-2xl border border-white/10 bg-white/[0.03] p-5"><Icon className={tint} size={20} /><div className="mt-5 text-sm text-zinc-400">{label}</div><div className="mt-1 font-display text-4xl font-extrabold">{stats.isLoading ? "—" : stats.data?.[key] ?? 0}</div></div>)}
     </div>

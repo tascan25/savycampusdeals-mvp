@@ -12,6 +12,7 @@ import { AppLockProvider } from "@/providers/AppLockProvider";
 import { AuthProvider, useAuth } from "@/providers/AuthProvider";
 import { NetworkProvider } from "@/providers/NetworkProvider";
 import { QueryProvider } from "@/providers/QueryProvider";
+import { PushNotificationProvider } from "@/providers/PushNotificationProvider";
 
 void SplashScreen.preventAutoHideAsync();
 
@@ -28,22 +29,45 @@ function RootNavigator() {
 
   return (
     <Stack
-      screenOptions={{ headerShown: false, contentStyle: { backgroundColor: color.background } }}
+      screenOptions={{
+        headerShown: false,
+        headerBackButtonDisplayMode: "minimal",
+        contentStyle: { backgroundColor: color.background },
+      }}
     >
       <Stack.Screen name="(auth)" />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen
         name="rewards"
-        options={{ headerShown: true, title: "Savvy Points", headerStyle: { backgroundColor: color.background }, headerTintColor: color.textPrimary, headerShadowVisible: false }}
+        options={{
+          headerShown: true,
+          title: "Savvy Points",
+          headerStyle: { backgroundColor: color.background },
+          headerTintColor: color.textPrimary,
+          headerShadowVisible: false,
+        }}
       />
       <Stack.Screen
         name="brand-claims"
-        options={{ headerShown: true, title: "Online offers", headerStyle: { backgroundColor: color.background }, headerTintColor: color.textPrimary, headerShadowVisible: false }}
+        options={{
+          headerShown: true,
+          title: "Online offers",
+          headerStyle: { backgroundColor: color.background },
+          headerTintColor: color.textPrimary,
+          headerShadowVisible: false,
+        }}
       />
       <Stack.Screen
-        name="offer/[id]"
-        options={{ headerShown: false }}
+        name="saved"
+        options={{
+          headerShown: true,
+          title: "Saved",
+          headerStyle: { backgroundColor: color.background },
+          headerTintColor: color.textPrimary,
+          headerShadowVisible: false,
+        }}
       />
+      <Stack.Screen name="offer/[id]" options={{ headerShown: false }} />
       <Stack.Screen
         name="outlet/[id]"
         options={{
@@ -54,10 +78,7 @@ function RootNavigator() {
           headerShadowVisible: false,
         }}
       />
-      <Stack.Screen
-        name="verify"
-        options={{ headerShown: false }}
-      />
+      <Stack.Screen name="verify" options={{ headerShown: false }} />
     </Stack>
   );
 }
@@ -71,9 +92,11 @@ export default function RootLayout() {
             <QueryProvider>
               <AuthProvider>
                 <AppLockProvider>
-                  <AnnouncementProvider>
-                    <RootNavigator />
-                  </AnnouncementProvider>
+                  <PushNotificationProvider>
+                    <AnnouncementProvider>
+                      <RootNavigator />
+                    </AnnouncementProvider>
+                  </PushNotificationProvider>
                 </AppLockProvider>
               </AuthProvider>
             </QueryProvider>

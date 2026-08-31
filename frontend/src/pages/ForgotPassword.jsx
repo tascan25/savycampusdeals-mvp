@@ -30,7 +30,7 @@ export default function ForgotPassword() {
         className="glass-heavy rounded-3xl p-8 md:p-10 w-full max-w-md">
         <Link to="/" className="inline-flex items-center gap-2 mb-6">
           <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 grid place-items-center"><Sparkles size={16}/></div>
-          <span className="font-display font-bold text-lg">Savy<span className="text-indigo-400">.</span></span>
+          <span className="font-display font-bold text-lg">Savvy<span className="text-indigo-400">.</span></span>
         </Link>
         <h1 className="font-display text-3xl font-extrabold">Reset password</h1>
         <p className="text-zinc-400 text-sm mt-2">Enter your email — we'll send a reset link.</p>

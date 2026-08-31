@@ -62,7 +62,7 @@ export default function Outlets() {
             Local outlets giving students the good stuff.
           </h1>
           <p className="text-zinc-400 mt-3 max-w-xl">
-            Cafés, restaurants and hangouts in your city with student-only offers. Show your Savy pass at the counter.
+            Cafés, restaurants and hangouts in your city with student-only offers. Show your Savvy pass at the counter.
           </p>
         </motion.div>
 

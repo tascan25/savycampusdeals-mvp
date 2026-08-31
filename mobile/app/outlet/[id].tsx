@@ -22,6 +22,7 @@ import { color, radius, space } from "@/design-system/tokens";
 import { useAuth } from "@/providers/AuthProvider";
 import { isBrandOfferClaim, type CouponClaimResult } from "@/types/offer";
 import { resolveMediaUrl } from "@/utils/media";
+import { getVerificationHref } from "@/utils/verificationRoute";
 
 export default function OutletDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -146,7 +147,7 @@ export default function OutletDetailScreen() {
 
         {!canClaim ? (
           <Pressable
-            onPress={() => router.push("/verify")}
+            onPress={() => router.push(getVerificationHref(user))}
             accessibilityRole="button"
             style={styles.gateNotice}
           >
@@ -201,7 +202,9 @@ export default function OutletDetailScreen() {
                       </AppText>
                     ) : null}
                     <View style={styles.viewDetailsRow}>
-                      <AppText variant="caption" color="#A5B4FC">View deal details</AppText>
+                      <AppText variant="caption" color="#A5B4FC">
+                        View deal details
+                      </AppText>
                       <Ionicons name="chevron-forward" size={13} color="#A5B4FC" />
                     </View>
                   </Pressable>

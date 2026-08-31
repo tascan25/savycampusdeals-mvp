@@ -9,6 +9,7 @@ import api, { formatApiError } from "@/lib/api";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
+import AdminPushNotificationsPanel from "@/pages/admin/AdminPushNotificationsPanel";
 
 const inputClass = "mt-1.5 w-full rounded-xl border border-white/10 bg-white/[0.045] px-3 py-2.5 text-sm text-white outline-none transition focus:border-violet-400";
 const emptyForm = () => {
@@ -176,6 +177,8 @@ export default function AdminAnnouncementsPage() {
         )) : <div className="rounded-3xl border border-dashed border-white/15 p-12 text-center"><BarChart3 className="mx-auto text-zinc-600" /><h2 className="mt-4 font-display text-xl font-bold">No announcements yet</h2><p className="mt-2 text-sm text-zinc-500">Create your first five-day feature drop.</p></div>}
         {announcements.isError && <p className="text-sm text-rose-300">Could not load announcements. Please try again.</p>}
       </div>
+
+      <AdminPushNotificationsPanel />
 
       {editor !== undefined && <AnnouncementEditor editing={editor} onClose={() => setEditor(undefined)} />}
     </>

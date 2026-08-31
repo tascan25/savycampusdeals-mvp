@@ -17,8 +17,20 @@ describe("mobile registration", () => {
   });
 
   it("requires matching password confirmation", () => {
-    const result = registerSchema.safeParse({ ...validRegistration, confirmPassword: "Different@123" });
+    const result = registerSchema.safeParse({
+      ...validRegistration,
+      confirmPassword: "Different@123",
+    });
     expect(result.success).toBe(false);
     if (!result.success) expect(result.error.issues[0]?.path).toEqual(["confirmPassword"]);
+  });
+
+  it("requires college, course, and year of study", () => {
+    for (const field of ["college", "course", "year"] as const) {
+      const result = registerSchema.safeParse({ ...validRegistration, [field]: "" });
+      expect(result.success).toBe(false);
+      if (!result.success)
+        expect(result.error.issues.some((issue) => issue.path[0] === field)).toBe(true);
+    }
   });
 });

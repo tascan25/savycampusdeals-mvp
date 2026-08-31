@@ -92,7 +92,7 @@ export default function PublicStudentPass() {
                 <div className="flex items-start gap-3">
                   <ShieldCheck className="mt-0.5 shrink-0 text-indigo-300" size={19} />
                   <div>
-                    <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500">Savy student number</p>
+                    <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500">Savvy student number</p>
                     <p className="mt-1 break-all font-mono text-sm font-semibold" data-testid="public-pass-number">{student.student_number}</p>
                   </div>
                 </div>

@@ -99,7 +99,7 @@ function ResultCard({ result, onRedeem, onClose, redeeming }) {
           : "bg-red-500/15 text-red-300 border-red-400/30"
         }`}>
           {studentOk ? <BadgeCheck size={14}/> : <ShieldAlert size={14}/>}
-          {studentOk ? "Verified SavyCampusDeals member" : result.student_expiry_expired ? "Pass expired" : "Not verified"}
+          {studentOk ? "Verified Savvy Campus member" : result.student_expiry_expired ? "Pass expired" : "Not verified"}
         </div>
 
         <div className="mt-4 flex items-center gap-3">
@@ -300,7 +300,7 @@ export default function Scan() {
       <div className="max-w-3xl mx-auto px-6 pt-28 pb-16 relative z-10">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
           <div className="text-[10px] uppercase tracking-[0.3em] text-emerald-400 flex items-center gap-2"><ScanLine size={12}/> Restaurant scanner</div>
-          <h1 className="font-display text-4xl md:text-5xl font-extrabold tracking-tighter mt-2">Scan a Savy pass or coupon.</h1>
+          <h1 className="font-display text-4xl md:text-5xl font-extrabold tracking-tighter mt-2">Scan a Savvy pass or coupon.</h1>
           <p className="text-zinc-400 mt-3">Point your camera at the student's QR to verify them or redeem a coupon.</p>
           <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-200" data-testid="scanner-outlet-badge">
             <BadgeCheck size={13} />

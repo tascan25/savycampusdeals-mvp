@@ -9,6 +9,7 @@ import { StudentCardView } from "@/components/StudentCardView";
 import { AppText, Button, Screen } from "@/design-system/components";
 import { color, radius, space } from "@/design-system/tokens";
 import { useAuth } from "@/providers/AuthProvider";
+import { getVerificationHref } from "@/utils/verificationRoute";
 
 export default function CardTab() {
   const { user } = useAuth();
@@ -34,7 +35,7 @@ export default function CardTab() {
           <AppText variant="body" color={color.textSecondary} style={styles.lockedBody}>
             Your digital student card unlocks after verification.
           </AppText>
-          <Button label="Verify now" onPress={() => router.push("/verify")} />
+          <Button label="Verify now" onPress={() => router.push(getVerificationHref(user))} />
         </View>
       </Screen>
     );
@@ -57,7 +58,9 @@ export default function CardTab() {
         </View>
         <View style={styles.reassurance}>
           <Ionicons name="lock-closed-outline" size={15} color={color.textTertiary} />
-          <AppText variant="caption" color={color.textTertiary}>Your QR shares only the details needed to verify membership.</AppText>
+          <AppText variant="caption" color={color.textTertiary}>
+            Your QR shares only the details needed to verify membership.
+          </AppText>
         </View>
       </View>
     </Screen>

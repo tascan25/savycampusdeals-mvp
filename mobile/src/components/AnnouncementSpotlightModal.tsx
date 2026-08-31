@@ -1,5 +1,14 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Image, Modal, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import {
+  Image,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  useWindowDimensions,
+  View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AnnouncementCategoryBadge } from "@/components/AnnouncementCategoryBadge";
 import { AppText, Button } from "@/design-system/components";
@@ -24,6 +33,11 @@ export function AnnouncementSpotlightModal({
   onViewAll: () => void;
   onClose: () => void;
 }) {
+  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const availableHeight = Math.max(260, windowHeight - insets.top - insets.bottom - space.xl);
+  const availableWidth = Math.min(420, windowWidth - space.xl);
+
   return (
     <Modal
       visible={Boolean(announcement)}
@@ -31,10 +45,20 @@ export function AnnouncementSpotlightModal({
       animationType="fade"
       onRequestClose={onClose}
     >
-      <View style={styles.backdrop}>
+      <View
+        style={[
+          styles.backdrop,
+          { paddingTop: insets.top + space.md, paddingBottom: insets.bottom + space.md },
+        ]}
+      >
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Close" />
         {announcement ? (
-          <ScrollView contentContainerStyle={styles.scrollContent} style={styles.scroll}>
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            style={[styles.scroll, { maxHeight: availableHeight, width: availableWidth }]}
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+          >
             <View style={styles.card}>
               <View style={styles.header}>
                 <AnnouncementCategoryBadge category={announcement.category} />
@@ -89,10 +113,10 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.7)",
     alignItems: "center",
     justifyContent: "center",
-    padding: space.lg,
+    paddingHorizontal: space.md,
   },
-  scroll: { maxHeight: "90%", width: "100%" },
-  scrollContent: { alignItems: "center" },
+  scroll: { width: "100%", flexGrow: 0 },
+  scrollContent: { flexGrow: 1, alignItems: "center", justifyContent: "center" },
   card: {
     width: "100%",
     maxWidth: 420,
@@ -103,7 +127,13 @@ const styles = StyleSheet.create({
     padding: space.lg,
     gap: space.sm,
   },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: space.sm,
+  },
   expiryRow: { flexDirection: "row", alignItems: "center", gap: 4 },
   image: { width: "100%", aspectRatio: 16 / 9, borderRadius: radius.md, marginTop: space.xs },
   iconWrap: {

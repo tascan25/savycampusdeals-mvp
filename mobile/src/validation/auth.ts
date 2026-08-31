@@ -28,9 +28,9 @@ export const registerSchema = z
     email: emailSchema,
     password: passwordSchema,
     confirmPassword: z.string().min(1, "Confirm your password."),
-    college: z.string().trim().optional(),
-    course: z.string().trim().optional(),
-    year: z.string().trim().optional(),
+    college: z.string().trim().min(2, "Enter your college name."),
+    course: z.string().trim().min(2, "Enter your course."),
+    year: z.string().trim().min(1, "Enter your year of study."),
     referralCode: z.string().trim().optional(),
   })
   .refine((values) => values.password === values.confirmPassword, {

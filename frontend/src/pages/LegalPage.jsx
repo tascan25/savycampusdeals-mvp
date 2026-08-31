@@ -5,7 +5,7 @@ import Navbar from "@/components/Navbar";
 import SiteFooter from "@/components/SiteFooter";
 import { openCookieSettings } from "@/lib/cookieConsent";
 
-const EFFECTIVE_DATE = "16 August 2026";
+const EFFECTIVE_DATE = "31 August 2026";
 
 const policies = {
   "/terms": {
@@ -71,18 +71,18 @@ const policies = {
         "Account information: name, email address, password hash, phone number when provided, college, course and academic year.",
         "Verification information: college ID details and images, a verification selfie, student number, verification outcome and expiry. Please avoid including unrelated sensitive information in uploaded images.",
         "Activity information: saved offers, claims, coupons, redemptions, referral activity, Savvy Points, announcements and interactions with the service.",
-        "Technical information: IP address, browser and device information, security logs, cookie preferences and, only with analytics consent, product usage and session insights collected through PostHog.",
+        "Technical information: IP address, browser and device information, security logs, cookie preferences and, only with analytics consent, product usage and session insights collected through PostHog. If you enable mobile notifications, we also process a Firebase push token, an app-installation identifier, app version, notification permission state and notification delivery/open interactions.",
         "Support information: messages and information you choose to share when requesting help.",
       ]],
       ["3. How we use information", [
-        "We use personal data to create and secure accounts, verify student eligibility, deliver offers and coupons, administer Savvy Points and referrals, provide support, prevent fraud, troubleshoot the service, communicate transactional updates and comply with legal obligations.",
+        "We use personal data to create and secure accounts, verify student eligibility, deliver offers and coupons, administer Savvy Points and referrals, provide support, prevent fraud, troubleshoot the service, communicate transactional updates and, where you enable them, deliver and measure mobile notifications, and comply with legal obligations.",
         "With your consent, we use analytics to understand feature usage and improve Savvy. You can withdraw analytics consent at any time through Cookie settings.",
       ]],
       ["4. Legal grounds", [
         "Depending on the activity and applicable law, we process data to perform our agreement with you, comply with legal obligations, pursue legitimate interests such as security and service improvement, and based on your consent where required.",
       ]],
       ["5. Who receives information", [
-        "We share only what is reasonably needed with service providers that support hosting, database operations, email delivery, student-document storage and analytics. Current service categories include MongoDB infrastructure, Cloudinary for verification images, Resend for email delivery and PostHog for consent-based analytics.",
+        "We share only what is reasonably needed with service providers that support hosting, database operations, email and push delivery, student-document storage and analytics. Current service categories include MongoDB infrastructure, Cloudinary for verification images, Resend for email delivery, Firebase Cloud Messaging for enabled Android notifications and PostHog for consent-based analytics.",
         "Participating outlets receive limited information needed to validate a pass or redeem a coupon. They should not receive your uploaded verification documents through the normal redemption flow.",
         "We may disclose information when required by law, to protect rights and safety, investigate misuse, or as part of a business reorganisation subject to appropriate protections. We do not sell personal data.",
       ]],
@@ -94,7 +94,7 @@ const policies = {
         "We use measures such as password hashing, access controls, encrypted transport and restricted administrative access. No online service is risk-free, so please use a strong, unique password and contact us if something looks off.",
       ]],
       ["8. Your choices and rights", [
-        "You may ask to access, correct or delete personal data, withdraw consent, raise a grievance or request information about processing, subject to applicable exceptions. You can change optional analytics choices through Cookie settings.",
+        "You may ask to access, correct or delete personal data, withdraw consent, raise a grievance or request information about processing, subject to applicable exceptions. You can change optional analytics choices through Cookie settings and control or disable mobile notification categories through your device settings.",
         "You can permanently delete your account and its associated account data from the Account page. For other privacy requests, email savycampus@gmail.com from your registered address. We may verify your identity before completing a request and will respond within the period required by applicable law.",
       ]],
       ["9. Children", [

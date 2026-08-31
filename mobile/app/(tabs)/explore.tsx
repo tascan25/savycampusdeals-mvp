@@ -10,7 +10,7 @@ import { color, space } from "@/design-system/tokens";
 type Segment = "deals" | "outlets";
 
 export default function ExploreTab() {
-  const params = useLocalSearchParams<{ tab?: string }>();
+  const params = useLocalSearchParams<{ tab?: string; category?: string }>();
   const [segment, setSegment] = useState<Segment>(params.tab === "deals" ? "deals" : "outlets");
   // Re-derive from a changed `tab` param (e.g. Home's "Find outlets" quick
   // action while this tab is already mounted) during render, not in an
@@ -27,8 +27,12 @@ export default function ExploreTab() {
   return (
     <Screen edges={["top"]}>
       <View style={styles.header}>
-        <AppText variant="caption" color={color.textTertiary} style={styles.eyebrow}>EXPLORE</AppText>
-        <AppText variant="h1">{segment === "outlets" ? "Nearby deals" : "All student deals"}</AppText>
+        <AppText variant="caption" color={color.textTertiary} style={styles.eyebrow}>
+          EXPLORE
+        </AppText>
+        <AppText variant="h1">
+          {segment === "outlets" ? "Nearby deals" : "All student deals"}
+        </AppText>
         <View style={styles.segmentWrap}>
           <SegmentedControl
             options={[
@@ -40,7 +44,11 @@ export default function ExploreTab() {
           />
         </View>
       </View>
-      {segment === "deals" ? <DealsExplorer /> : <OutletsExplorer />}
+      {segment === "deals" ? (
+        <DealsExplorer initialCategory={params.category} key={params.category || "all"} />
+      ) : (
+        <OutletsExplorer />
+      )}
     </Screen>
   );
 }

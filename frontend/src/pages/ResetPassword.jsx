@@ -29,7 +29,7 @@ export default function ResetPassword() {
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-heavy rounded-3xl p-10 w-full max-w-md">
         <Link to="/" className="inline-flex items-center gap-2 mb-6">
           <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 grid place-items-center"><Sparkles size={16}/></div>
-          <span className="font-display font-bold text-lg">Savy<span className="text-indigo-400">.</span></span>
+          <span className="font-display font-bold text-lg">Savvy<span className="text-indigo-400">.</span></span>
         </Link>
         <h1 className="font-display text-3xl font-extrabold">Set a new password</h1>
         <form onSubmit={onSubmit} className="mt-8 space-y-4">

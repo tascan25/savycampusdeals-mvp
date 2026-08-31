@@ -18,10 +18,17 @@ describe("resolveCtaRoute", () => {
     });
   });
 
-  it("maps /offers to the Explore tab's deals segment", () => {
+  it("maps a specific offer to its native detail screen", () => {
     expect(resolveCtaRoute("/offers/some-offer-id")).toEqual({
-      push: "/(tabs)/explore",
-      params: { tab: "deals" },
+      push: "/offer/[id]",
+      params: { id: "some-offer-id" },
+    });
+  });
+
+  it("preserves an outlet identifier for notification deep links", () => {
+    expect(resolveCtaRoute("/outlets/507f1f77bcf86cd799439011")).toEqual({
+      push: "/outlet/[id]",
+      params: { id: "507f1f77bcf86cd799439011" },
     });
   });
 

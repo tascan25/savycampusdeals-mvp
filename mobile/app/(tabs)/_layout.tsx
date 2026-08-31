@@ -23,7 +23,7 @@ export default function TabsLayout() {
     <Tabs
       screenOptions={({ route }) => ({
         headerShown: false,
-        tabBarActiveTintColor: "#A5B4FC",
+        tabBarActiveTintColor: "#D8B4FE",
         tabBarInactiveTintColor: color.textTertiary,
         tabBarHideOnKeyboard: true,
         sceneStyle: { paddingBottom: 74 + bottomOffset, backgroundColor: color.background },
@@ -61,7 +61,7 @@ const styles = StyleSheet.create({
     borderRadius: 34,
     borderCurve: "continuous",
     overflow: "hidden",
-    backgroundColor: "rgba(20,20,25,0.98)",
+    backgroundColor: "rgba(20,20,25,0.84)",
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(255,255,255,0.13)",
     shadowColor: "#000000",
@@ -84,8 +84,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   iconWrapActive: {
-    backgroundColor: color.primarySoft,
+    backgroundColor: "rgba(147,51,234,0.18)",
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(129,140,248,0.20)",
+    borderColor: "rgba(216,180,254,0.30)",
   },
 });

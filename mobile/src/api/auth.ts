@@ -18,9 +18,9 @@ export async function apiRegister(input: {
   name: string;
   email: string;
   password: string;
-  college?: string;
-  course?: string;
-  year?: string;
+  college: string;
+  course: string;
+  year: string;
   phone?: string;
   referral_code?: string;
 }): Promise<AuthResponse & { email_sent: boolean; dev_otp?: string; email_error?: string }> {
@@ -33,13 +33,23 @@ export async function apiLogin(input: { email: string; password: string }): Prom
   return data;
 }
 
+export async function apiAccountExists(email: string): Promise<boolean> {
+  const { data } = await apiClient.post<{ exists: boolean }>("/auth/mobile/account-exists", {
+    email,
+  });
+  return data.exists;
+}
+
 export async function apiRefresh(refreshToken: string): Promise<AuthResponse> {
   const { data } = await apiClient.post("/auth/mobile/refresh", { refresh_token: refreshToken });
   return data;
 }
 
-export async function apiLogout(refreshToken: string): Promise<void> {
-  await apiClient.post("/auth/mobile/logout", { refresh_token: refreshToken });
+export async function apiLogout(refreshToken: string, installationId?: string): Promise<void> {
+  await apiClient.post("/auth/mobile/logout", {
+    refresh_token: refreshToken,
+    installation_id: installationId,
+  });
 }
 
 export async function apiLogoutAll(): Promise<{ revoked_count: number }> {

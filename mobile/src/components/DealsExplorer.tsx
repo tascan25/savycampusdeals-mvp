@@ -18,11 +18,11 @@ const SORTS: { value: OfferSort; label: string }[] = [
   { value: "latest", label: "Latest" },
 ];
 
-export function DealsExplorer() {
+export function DealsExplorer({ initialCategory }: { initialCategory?: string }) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
-  const [category, setCategory] = useState("all");
+  const [category, setCategory] = useState(initialCategory || "all");
   const [sort, setSort] = useState<OfferSort>("featured");
   const debouncedQuery = useDebouncedValue(query, 350);
 

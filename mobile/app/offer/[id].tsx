@@ -24,6 +24,7 @@ import { color, radius, space } from "@/design-system/tokens";
 import { useAuth } from "@/providers/AuthProvider";
 import { isBrandOfferClaim, type ClaimResult } from "@/types/offer";
 import { resolveMediaUrl } from "@/utils/media";
+import { getVerificationHref } from "@/utils/verificationRoute";
 
 export default function OfferDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -105,37 +106,109 @@ export default function OfferDetailScreen() {
     <Screen edges={[]}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.heroWrap}>
-          <Image source={{ uri: resolveMediaUrl(offer.image_url) }} style={styles.hero} resizeMode="cover" />
-          <LinearGradient colors={["rgba(0,0,0,0.5)", "transparent", "rgba(0,0,0,0.38)"]} locations={[0, 0.42, 1]} style={StyleSheet.absoluteFill} />
+          <Image
+            source={{ uri: resolveMediaUrl(offer.image_url) }}
+            style={styles.hero}
+            resizeMode="cover"
+          />
+          <LinearGradient
+            colors={["rgba(0,0,0,0.5)", "transparent", "rgba(0,0,0,0.38)"]}
+            locations={[0, 0.42, 1]}
+            style={StyleSheet.absoluteFill}
+          />
           <View style={[styles.heroControls, { top: insets.top + 8 }]}>
-            <Pressable onPress={() => router.back()} style={styles.circleButton} accessibilityRole="button" accessibilityLabel="Go back"><Ionicons name="arrow-back" size={25} color="#FFFFFF" /></Pressable>
-            <Pressable onPress={() => void toggleSave()} style={styles.circleButton} accessibilityRole="button" accessibilityLabel={offer.saved ? "Remove from saved" : "Save deal"}><Ionicons name={offer.saved ? "bookmark" : "bookmark-outline"} size={23} color="#FFFFFF" /></Pressable>
+            <Pressable
+              onPress={() => router.back()}
+              style={styles.circleButton}
+              accessibilityRole="button"
+              accessibilityLabel="Go back"
+            >
+              <Ionicons name="arrow-back" size={25} color="#FFFFFF" />
+            </Pressable>
+            <Pressable
+              onPress={() => void toggleSave()}
+              style={styles.circleButton}
+              accessibilityRole="button"
+              accessibilityLabel={offer.saved ? "Remove from saved" : "Save deal"}
+            >
+              <Ionicons
+                name={offer.saved ? "bookmark" : "bookmark-outline"}
+                size={23}
+                color="#FFFFFF"
+              />
+            </Pressable>
           </View>
-          <View style={styles.discountPill}><AppText style={styles.discountText}>{offer.discount}</AppText></View>
+          <View style={styles.discountPill}>
+            <AppText style={styles.discountText}>{offer.discount}</AppText>
+          </View>
         </View>
 
         <View style={styles.sheet}>
           <View style={styles.handle} />
           <AppText style={styles.brand}>{offer.brand}</AppText>
           <View style={styles.metaRow}>
-            <View style={styles.metaItem}><Ionicons name="shield-checkmark" size={16} color="#54D49B" /><AppText variant="small" color={color.textSecondary}>Verified students only</AppText></View>
+            <View style={styles.metaItem}>
+              <Ionicons name="shield-checkmark" size={16} color="#54D49B" />
+              <AppText variant="small" color={color.textSecondary}>
+                Verified students only
+              </AppText>
+            </View>
             <View style={styles.metaDot} />
-            <View style={styles.metaItem}><Ionicons name={offer.outlet_id ? "location-outline" : "people-outline"} size={15} color={color.textSecondary} /><AppText variant="small" color={color.textSecondary} numberOfLines={1}>{offer.location || `${offer.claims_count.toLocaleString("en-IN")} claimed`}</AppText></View>
+            <View style={styles.metaItem}>
+              <Ionicons
+                name={offer.outlet_id ? "location-outline" : "people-outline"}
+                size={15}
+                color={color.textSecondary}
+              />
+              <AppText variant="small" color={color.textSecondary} numberOfLines={1}>
+                {offer.location || `${offer.claims_count.toLocaleString("en-IN")} claimed`}
+              </AppText>
+            </View>
           </View>
 
-          <AppText variant="body" color="#B8B8C2" style={styles.description}>{offer.description || offer.title}</AppText>
+          <AppText variant="body" color="#B8B8C2" style={styles.description}>
+            {offer.description || offer.title}
+          </AppText>
 
           <View style={styles.factList}>
-            <FactRow icon="restaurant-outline" iconColor="#D4D4D8" label={offer.outlet_id ? "Redeem at the outlet" : "Redeem on official website"} />
+            <FactRow
+              icon="restaurant-outline"
+              iconColor="#D4D4D8"
+              label={offer.outlet_id ? "Redeem at the outlet" : "Redeem on official website"}
+            />
             <FactRow icon="calendar-outline" iconColor="#54D49B" label={validity} />
-            <FactRow icon="ticket-outline" iconColor="#8B7CFF" label={offer.redemption_policy || "One use per verified student"} />
+            <FactRow
+              icon="ticket-outline"
+              iconColor="#8B7CFF"
+              label={offer.redemption_policy || "One use per verified student"}
+            />
           </View>
 
-          <Pressable style={styles.termsToggle} onPress={() => setTermsOpen((value) => !value)} accessibilityRole="button" accessibilityState={{ expanded: termsOpen }}>
+          <Pressable
+            style={styles.termsToggle}
+            onPress={() => setTermsOpen((value) => !value)}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: termsOpen }}
+          >
             <AppText variant="bodyMedium">Terms & details</AppText>
-            <Ionicons name={termsOpen ? "chevron-up" : "chevron-down"} size={20} color={color.textSecondary} />
+            <Ionicons
+              name={termsOpen ? "chevron-up" : "chevron-down"}
+              size={20}
+              color={color.textSecondary}
+            />
           </Pressable>
-          {termsOpen ? <View style={styles.termsBody}><AppText variant="small" color={color.textSecondary} style={styles.termsText}>{offer.terms}</AppText>{isListedBrand && offer.disclaimer ? <AppText variant="caption" color={color.textTertiary} style={styles.disclaimer}>{offer.disclaimer}</AppText> : null}</View> : null}
+          {termsOpen ? (
+            <View style={styles.termsBody}>
+              <AppText variant="small" color={color.textSecondary} style={styles.termsText}>
+                {offer.terms}
+              </AppText>
+              {isListedBrand && offer.disclaimer ? (
+                <AppText variant="caption" color={color.textTertiary} style={styles.disclaimer}>
+                  {offer.disclaimer}
+                </AppText>
+              ) : null}
+            </View>
+          ) : null}
 
           {claimResult && !isBrandOfferClaim(claimResult) ? (
             <View style={styles.successWrap}>
@@ -145,7 +218,7 @@ export default function OfferDetailScreen() {
             <>
               {!canClaim ? (
                 <Pressable
-                  onPress={() => router.push("/verify")}
+                  onPress={() => router.push(getVerificationHref(user))}
                   accessibilityRole="button"
                   style={styles.verifyNotice}
                 >
@@ -213,11 +286,23 @@ export default function OfferDetailScreen() {
   );
 }
 
-function FactRow({ icon, iconColor, label }: { icon: keyof typeof Ionicons.glyphMap; iconColor: string; label: string }) {
+function FactRow({
+  icon,
+  iconColor,
+  label,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  iconColor: string;
+  label: string;
+}) {
   return (
     <View style={styles.factRow}>
-      <View style={styles.factIcon}><Ionicons name={icon} size={21} color={iconColor} /></View>
-      <AppText variant="body" color="#D4D4DC" style={styles.factLabel}>{label}</AppText>
+      <View style={styles.factIcon}>
+        <Ionicons name={icon} size={21} color={iconColor} />
+      </View>
+      <AppText variant="body" color="#D4D4DC" style={styles.factLabel}>
+        {label}
+      </AppText>
     </View>
   );
 }
@@ -227,25 +312,103 @@ const styles = StyleSheet.create({
   content: { paddingBottom: 0 },
   heroWrap: { height: 430, backgroundColor: color.surfaceElevated },
   hero: { width: "100%", height: "100%" },
-  heroControls: { position: "absolute", left: space.lg, right: space.lg, flexDirection: "row", justifyContent: "space-between" },
-  circleButton: { width: 52, height: 52, borderRadius: 26, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(6,6,8,0.72)", borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.24)" },
-  discountPill: { position: "absolute", right: space.lg, bottom: 8, paddingHorizontal: space.md, paddingVertical: 10, borderRadius: radius.md, backgroundColor: "#4F46E5", shadowColor: "#4F46E5", shadowOpacity: 0.5, shadowRadius: 14, shadowOffset: { width: 0, height: 4 }, elevation: 8 },
+  heroControls: {
+    position: "absolute",
+    left: space.lg,
+    right: space.lg,
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  circleButton: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(6,6,8,0.72)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(255,255,255,0.24)",
+  },
+  discountPill: {
+    position: "absolute",
+    right: space.lg,
+    bottom: 8,
+    paddingHorizontal: space.md,
+    paddingVertical: 10,
+    borderRadius: radius.md,
+    backgroundColor: "#4F46E5",
+    shadowColor: "#4F46E5",
+    shadowOpacity: 0.5,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+  },
   discountText: { fontSize: 25, lineHeight: 29, fontWeight: "800" },
-  sheet: { marginTop: -20, minHeight: 500, paddingHorizontal: space.lg, paddingTop: space.sm, gap: space.md, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, backgroundColor: color.background },
-  handle: { alignSelf: "center", width: 54, height: 5, marginBottom: space.sm, borderRadius: 3, backgroundColor: "#393940" },
+  sheet: {
+    marginTop: -20,
+    minHeight: 500,
+    paddingHorizontal: space.lg,
+    paddingTop: space.sm,
+    gap: space.md,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    backgroundColor: color.background,
+  },
+  handle: {
+    alignSelf: "center",
+    width: 54,
+    height: 5,
+    marginBottom: space.sm,
+    borderRadius: 3,
+    backgroundColor: "#393940",
+  },
   brand: { fontSize: 30, lineHeight: 36, fontWeight: "800", letterSpacing: -0.6 },
   metaRow: { flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" },
   metaItem: { flexDirection: "row", alignItems: "center", gap: 5, maxWidth: "70%" },
   metaDot: { width: 3, height: 3, borderRadius: 2, backgroundColor: color.textTertiary },
   description: { lineHeight: 23, marginVertical: space.xs },
-  factList: { borderRadius: radius.md, overflow: "hidden", borderWidth: StyleSheet.hairlineWidth, borderColor: color.border },
-  factRow: { minHeight: 58, paddingHorizontal: space.md, flexDirection: "row", alignItems: "center", borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: color.border, backgroundColor: "rgba(255,255,255,0.018)" },
+  factList: {
+    borderRadius: radius.md,
+    overflow: "hidden",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: color.border,
+  },
+  factRow: {
+    minHeight: 58,
+    paddingHorizontal: space.md,
+    flexDirection: "row",
+    alignItems: "center",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: color.border,
+    backgroundColor: "rgba(255,255,255,0.018)",
+  },
   factIcon: { width: 38 },
   factLabel: { flex: 1 },
-  termsToggle: { minHeight: 58, paddingHorizontal: space.md, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, borderColor: color.border, backgroundColor: color.surface },
+  termsToggle: {
+    minHeight: 58,
+    paddingHorizontal: space.md,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: color.border,
+    backgroundColor: color.surface,
+  },
   termsBody: { marginTop: -space.sm, paddingHorizontal: space.md, gap: space.sm },
-  disclaimer: { paddingTop: space.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: color.border },
-  verifyNotice: { flexDirection: "row", alignItems: "flex-start", gap: space.xs, padding: space.md, borderRadius: radius.md, backgroundColor: "rgba(245,158,11,0.08)" },
+  disclaimer: {
+    paddingTop: space.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: color.border,
+  },
+  verifyNotice: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: space.xs,
+    padding: space.md,
+    borderRadius: radius.md,
+    backgroundColor: "rgba(245,158,11,0.08)",
+  },
   noticeText: { flex: 1 },
   successWrap: { marginTop: space.sm },
   termsText: { lineHeight: 20 },
