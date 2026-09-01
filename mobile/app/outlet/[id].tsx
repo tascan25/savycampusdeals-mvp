@@ -220,17 +220,23 @@ export default function OutletDetailScreen() {
                   <View style={styles.dealAction}>
                     <AppText variant="h3">{offer.discount}</AppText>
                     {couponActive && !newlyClaimed ? (
-                      <Pressable
-                        onPress={() => router.push("/(tabs)/wallet")}
-                        accessibilityRole="button"
-                        accessibilityLabel="Coupon active. View in Wallet"
-                        style={({ pressed }) => [styles.activeBadge, pressed && styles.activePressed]}
-                      >
-                        <Ionicons name="checkmark-circle" size={13} color={color.success} />
-                        <AppText variant="caption" color={color.success}>
-                          Coupon active
-                        </AppText>
-                      </Pressable>
+                      <View style={styles.activeAction}>
+                        <View style={styles.activeBadge}>
+                          <Ionicons name="checkmark-circle" size={13} color={color.success} />
+                          <AppText variant="caption" color={color.success}>
+                            Coupon active
+                          </AppText>
+                        </View>
+                        <Pressable
+                          onPress={() => router.push("/(tabs)/wallet")}
+                          accessibilityRole="button"
+                          accessibilityLabel="View active coupon in Wallet"
+                          style={({ pressed }) => [styles.walletButton, pressed && styles.activePressed]}
+                        >
+                          <Ionicons name="wallet-outline" size={13} color={color.textPrimary} />
+                          <AppText variant="caption">View in Wallet</AppText>
+                        </Pressable>
+                      </View>
                     ) : !newlyClaimed ? (
                       <Button
                         label="Claim"
@@ -310,6 +316,7 @@ const styles = StyleSheet.create({
   viewDetailsRow: { marginTop: space.sm, flexDirection: "row", alignItems: "center", gap: 3 },
   blockedText: { marginTop: 4 },
   dealAction: { alignItems: "flex-end", gap: space.sm, minWidth: 110 },
+  activeAction: { alignItems: "flex-end", gap: 7 },
   activeBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -320,6 +327,17 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(84,212,155,0.4)",
     backgroundColor: "rgba(84,212,155,0.1)",
+  },
+  walletButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: radius.pill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: color.border,
+    backgroundColor: color.surfaceElevated,
   },
   activePressed: { opacity: 0.72 },
 });

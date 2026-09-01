@@ -230,17 +230,15 @@ export default function OfferDetailScreen() {
               <ClaimSuccessCard coupon={couponResult} />
             </View>
           ) : couponActive ? (
-            <Pressable
-              onPress={() => router.push("/(tabs)/wallet")}
-              accessibilityRole="button"
-              accessibilityLabel="Coupon active. View in Wallet"
-              style={({ pressed }) => [styles.activeBadge, pressed && styles.activePressed]}
-            >
-              <Ionicons name="checkmark-circle" size={15} color={color.success} />
-              <AppText variant="small" color={color.success}>
-                Coupon active
-              </AppText>
-            </Pressable>
+            <View style={styles.activeCouponActions}>
+              <View style={styles.activeBadge}>
+                <Ionicons name="checkmark-circle" size={15} color={color.success} />
+                <AppText variant="small" color={color.success}>
+                  Coupon active
+                </AppText>
+              </View>
+              <Button label="View in Wallet" onPress={() => router.push("/(tabs)/wallet")} />
+            </View>
           ) : (
             <>
               {!canClaim ? (
@@ -438,6 +436,7 @@ const styles = StyleSheet.create({
   },
   noticeText: { flex: 1 },
   successWrap: { marginTop: space.sm },
+  activeCouponActions: { gap: space.sm, marginTop: space.xs },
   activeBadge: {
     alignSelf: "flex-start",
     flexDirection: "row",
@@ -450,7 +449,6 @@ const styles = StyleSheet.create({
     borderColor: "rgba(84,212,155,0.4)",
     backgroundColor: "rgba(84,212,155,0.1)",
   },
-  activePressed: { opacity: 0.72 },
   termsText: { lineHeight: 20 },
   modalBackdrop: {
     flex: 1,
