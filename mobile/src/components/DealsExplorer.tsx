@@ -1,8 +1,7 @@
-import { FlashList } from "@shopify/flash-list";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import { useMemo, useState } from "react";
-import { ScrollView, StyleSheet, View } from "react-native";
+import { FlatList, StyleSheet, View } from "react-native";
 
 import { apiListOfferCategories, apiListOffers, apiToggleSaveOffer } from "@/api/offers";
 import { queryKeys } from "@/api/queryKeys";
@@ -61,7 +60,7 @@ export function DealsExplorer({ initialCategory }: { initialCategory?: string })
   };
 
   return (
-    <FlashList
+    <FlatList
       style={styles.list}
       data={offersQuery.data ?? []}
       keyExtractor={(item) => item.id}
@@ -86,15 +85,25 @@ export function DealsExplorer({ initialCategory }: { initialCategory?: string })
             placeholder="Search brands, offers…"
             testID="offers-search-input"
           />
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
-            {SORTS.map((s) => (
+          <FlatList
+            horizontal
+            data={SORTS}
+            keyExtractor={(item) => item.value}
+            showsHorizontalScrollIndicator={false}
+            style={styles.chipRow}
+            renderItem={({ item: s }) => (
               <View key={s.value} style={styles.chipGap}>
                 <Chip label={s.label} active={sort === s.value} onPress={() => setSort(s.value)} />
               </View>
-            ))}
-          </ScrollView>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
-            {categories.map((c) => (
+            )}
+          />
+          <FlatList
+            horizontal
+            data={categories}
+            keyExtractor={(item) => item}
+            showsHorizontalScrollIndicator={false}
+            style={styles.chipRow}
+            renderItem={({ item: c }) => (
               <View key={c} style={styles.chipGap}>
                 <Chip
                   label={c === "all" ? "All" : c}
@@ -102,8 +111,8 @@ export function DealsExplorer({ initialCategory }: { initialCategory?: string })
                   onPress={() => setCategory(c)}
                 />
               </View>
-            ))}
-          </ScrollView>
+            )}
+          />
         </View>
       }
       ListEmptyComponent={

@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Modal, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { FlatList, Modal, Pressable, StyleSheet, View } from "react-native";
 
 import { AnnouncementCategoryBadge } from "@/components/AnnouncementCategoryBadge";
 import { AppText, Screen } from "@/design-system/components";
@@ -50,12 +50,13 @@ export function AnnouncementCentreModal({
           </Pressable>
         </View>
 
-        <ScrollView
+        <FlatList
           style={styles.scroll}
+          data={items}
+          keyExtractor={(item) => item.id}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
-        >
-          {items.length === 0 ? (
+          ListEmptyComponent={
             <View style={styles.empty}>
               <Ionicons name="megaphone-outline" size={24} color={color.textTertiary} />
               <AppText variant="small" color={color.textSecondary} style={styles.emptyTitle}>
@@ -65,38 +66,37 @@ export function AnnouncementCentreModal({
                 New Savvy drops will appear here.
               </AppText>
             </View>
-          ) : (
-            items.map((announcement) => (
-              <Pressable
-                key={announcement.id}
-                onPress={() => (announcement.cta_label ? onCta(announcement) : undefined)}
-                style={styles.card}
-              >
-                {!announcement.seen ? <View style={styles.unreadDot} /> : null}
-                <View style={styles.cardHeader}>
-                  <AnnouncementCategoryBadge category={announcement.category} />
-                  <AppText variant="caption" color={color.textTertiary}>
-                    Until {formatExpiry(announcement.expires_at)}
+          }
+          renderItem={({ item: announcement }) => (
+            <Pressable
+              onPress={() => (announcement.cta_label ? onCta(announcement) : undefined)}
+              style={styles.card}
+            >
+              {!announcement.seen ? <View style={styles.unreadDot} /> : null}
+              <View style={styles.cardHeader}>
+                <AnnouncementCategoryBadge category={announcement.category} />
+                <AppText variant="caption" color={color.textTertiary}>
+                  Until {formatExpiry(announcement.expires_at)}
+                </AppText>
+              </View>
+              <AppText variant="bodyMedium" style={styles.cardTitle}>
+                {announcement.title}
+              </AppText>
+              <AppText variant="small" color={color.textSecondary} style={styles.cardMessage}>
+                {announcement.message}
+              </AppText>
+              {announcement.cta_label ? (
+                <View style={styles.ctaRow}>
+                  <AppText variant="small" color={color.primary}>
+                    {announcement.cta_label}
                   </AppText>
+                  <Ionicons name="arrow-forward" size={14} color={color.primary} />
                 </View>
-                <AppText variant="bodyMedium" style={styles.cardTitle}>
-                  {announcement.title}
-                </AppText>
-                <AppText variant="small" color={color.textSecondary} style={styles.cardMessage}>
-                  {announcement.message}
-                </AppText>
-                {announcement.cta_label ? (
-                  <View style={styles.ctaRow}>
-                    <AppText variant="small" color={color.primary}>
-                      {announcement.cta_label}
-                    </AppText>
-                    <Ionicons name="arrow-forward" size={14} color={color.primary} />
-                  </View>
-                ) : null}
-              </Pressable>
-            ))
+              ) : null}
+            </Pressable>
           )}
-        </ScrollView>
+          ItemSeparatorComponent={() => <View style={styles.separator} />}
+        />
       </Screen>
     </Modal>
   );
@@ -122,7 +122,8 @@ const styles = StyleSheet.create({
     backgroundColor: color.surfaceMuted,
   },
   scroll: { flex: 1, width: "100%" },
-  list: { flexGrow: 1, width: "100%", padding: space.lg, paddingTop: 0, gap: space.md },
+  list: { flexGrow: 1, width: "100%", padding: space.lg, paddingTop: 0 },
+  separator: { height: space.md },
   card: {
     borderRadius: radius.lg,
     borderWidth: StyleSheet.hairlineWidth,

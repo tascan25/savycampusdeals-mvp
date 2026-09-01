@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import { useState } from "react";
-import { ActivityIndicator, Linking, ScrollView, StyleSheet, View } from "react-native";
+import { ActivityIndicator, FlatList, Linking, StyleSheet, View } from "react-native";
 
 import { apiListBrandOfferClaims, apiListCoupons } from "@/api/coupons";
 import { apiClaimOffer } from "@/api/offers";
@@ -41,18 +41,25 @@ function PartnerCoupons({
   onOpen: (coupon: CouponClaimResult) => void;
   onExplore: () => void;
 }) {
-  if (isLoading) return <ActivityIndicator color={color.primary} style={styles.loading} />;
-  if (coupons.length === 0) {
-    return <EmptyState message="No partner coupons yet." onPress={onExplore} />;
-  }
   return (
-    <View style={styles.grid}>
-      {coupons.map((coupon) => (
-        <View key={coupon.id} style={styles.gridItem}>
-          <CouponListItem coupon={coupon} onPress={() => onOpen(coupon)} />
+    <FlatList
+      data={coupons}
+      keyExtractor={(item) => item.id}
+      numColumns={2}
+      contentContainerStyle={styles.grid}
+      renderItem={({ item }) => (
+        <View style={styles.gridItem}>
+          <CouponListItem coupon={item} onPress={() => onOpen(item)} />
         </View>
-      ))}
-    </View>
+      )}
+      ListEmptyComponent={
+        isLoading ? (
+          <ActivityIndicator color={color.primary} style={styles.loading} />
+        ) : (
+          <EmptyState message="No partner coupons yet." onPress={onExplore} />
+        )
+      }
+    />
   );
 }
 
@@ -69,21 +76,27 @@ function BrandOffers({
   onContinue: (offerId: string, fallbackUrl: string) => void;
   onExplore: () => void;
 }) {
-  if (isLoading) return <ActivityIndicator color={color.primary} style={styles.loading} />;
-  if (claims.length === 0) {
-    return <EmptyState message="No listed brand offers claimed yet." onPress={onExplore} />;
-  }
   return (
-    <View style={styles.list}>
-      {claims.map((claim) => (
+    <FlatList
+      data={claims}
+      keyExtractor={(item) => item.id}
+      contentContainerStyle={styles.list}
+      renderItem={({ item: claim }) => (
         <BrandClaimListItem
-          key={claim.id}
           claim={claim}
           continuing={continuingId === claim.offer_id}
           onContinue={() => onContinue(claim.offer_id, claim.official_url)}
         />
-      ))}
-    </View>
+      )}
+      ItemSeparatorComponent={() => <View style={styles.listSeparator} />}
+      ListEmptyComponent={
+        isLoading ? (
+          <ActivityIndicator color={color.primary} style={styles.loading} />
+        ) : (
+          <EmptyState message="No listed brand offers claimed yet." onPress={onExplore} />
+        )
+      }
+    />
   );
 }
 
@@ -133,24 +146,22 @@ export function CouponsPanel() {
         />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        {segment === "partner" ? (
-          <PartnerCoupons
-            coupons={couponsQuery.data ?? []}
-            isLoading={couponsQuery.isLoading}
-            onOpen={setActiveCoupon}
-            onExplore={goExplore}
-          />
-        ) : (
-          <BrandOffers
-            claims={brandClaimsQuery.data ?? []}
-            isLoading={brandClaimsQuery.isLoading}
-            continuingId={continuingId}
-            onContinue={continueToBrand}
-            onExplore={goExplore}
-          />
-        )}
-      </ScrollView>
+      {segment === "partner" ? (
+        <PartnerCoupons
+          coupons={couponsQuery.data ?? []}
+          isLoading={couponsQuery.isLoading}
+          onOpen={setActiveCoupon}
+          onExplore={goExplore}
+        />
+      ) : (
+        <BrandOffers
+          claims={brandClaimsQuery.data ?? []}
+          isLoading={brandClaimsQuery.isLoading}
+          continuingId={continuingId}
+          onContinue={continueToBrand}
+          onExplore={goExplore}
+        />
+      )}
 
       <CouponDetailModal
         coupon={activeCoupon}
@@ -166,7 +177,6 @@ export function CouponsPanel() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   segmentWrap: { paddingHorizontal: space.lg, paddingVertical: space.md },
-  scrollContent: { flexGrow: 1 },
   loading: { marginTop: space.xl },
   grid: {
     flexDirection: "row",
@@ -175,7 +185,8 @@ const styles = StyleSheet.create({
     paddingBottom: space.xl,
   },
   gridItem: { width: "50%", padding: space.xs },
-  list: { paddingHorizontal: space.lg, paddingBottom: space.xl, gap: space.md },
+  list: { flexGrow: 1, paddingHorizontal: space.lg, paddingBottom: space.xl },
+  listSeparator: { height: space.md },
   empty: { alignItems: "center", padding: space.xl, gap: space.sm },
   emptyText: { textAlign: "center" },
 });

@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { StyleSheet, View } from "react-native";
+import { FlatList, StyleSheet, View } from "react-native";
 
 import { AppText } from "@/design-system/components";
 import { color, radius, space } from "@/design-system/tokens";
@@ -37,9 +37,12 @@ export function PointsActivityList({ activity }: { activity: PointsActivityItem[
   }
 
   return (
-    <View style={styles.list}>
-      {activity.map((item) => (
-        <View key={item.id} style={styles.row}>
+    <FlatList
+      data={activity}
+      keyExtractor={(item) => item.id}
+      scrollEnabled={false}
+      renderItem={({ item }) => (
+        <View style={styles.row}>
           <View style={styles.icon}>
             <Ionicons
               name={EVENT_ICONS[item.event_type] ?? "sparkles"}
@@ -64,13 +67,14 @@ export function PointsActivityList({ activity }: { activity: PointsActivityItem[
             </AppText>
           </View>
         </View>
-      ))}
-    </View>
+      )}
+      ItemSeparatorComponent={() => <View style={styles.separator} />}
+    />
   );
 }
 
 const styles = StyleSheet.create({
-  list: { gap: space.xs },
+  separator: { height: space.xs },
   row: { flexDirection: "row", alignItems: "center", gap: space.sm, paddingVertical: space.xs },
   icon: {
     width: 34,

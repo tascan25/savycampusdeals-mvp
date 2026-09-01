@@ -5,10 +5,9 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
+  FlatList,
   Image,
   Pressable,
-  RefreshControl,
-  ScrollView,
   StyleSheet,
   useWindowDimensions,
   View,
@@ -219,8 +218,8 @@ export default function HomeTab() {
   const { user } = useAuth();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const spotlightRef = useRef<ScrollView>(null);
-  const outletRef = useRef<ScrollView>(null);
+  const spotlightRef = useRef<FlatList<Offer>>(null);
+  const outletRef = useRef<FlatList<Outlet>>(null);
   const [spotlightScrollX] = useState(() => new Animated.Value(0));
   const [outletScrollX] = useState(() => new Animated.Value(0));
   const { width: viewportWidth } = useWindowDimensions();
@@ -321,7 +320,7 @@ export default function HomeTab() {
     const initialIndex = 1;
     const frame = requestAnimationFrame(() => {
       const stride = getSpotlightWidth(viewportWidth) + space.md;
-      spotlightRef.current?.scrollTo({ x: initialIndex * stride, animated: false });
+      spotlightRef.current?.scrollToOffset({ offset: initialIndex * stride, animated: false });
       setSpotlightIndex(initialIndex);
     });
     return () => cancelAnimationFrame(frame);
@@ -333,7 +332,7 @@ export default function HomeTab() {
       setSpotlightIndex((current) => {
         const next = (current + 1) % spotlightOffers.length;
         const stride = getSpotlightWidth(viewportWidth) + space.md;
-        spotlightRef.current?.scrollTo({ x: next * stride, animated: true });
+        spotlightRef.current?.scrollToOffset({ offset: next * stride, animated: true });
         return next;
       });
     }, 4_500);
@@ -403,7 +402,7 @@ export default function HomeTab() {
     const timer = setInterval(() => {
       setOutletIndex((current) => {
         const next = (current + 1) % campusPicks.length;
-        outletRef.current?.scrollTo({ x: next * outletStride, animated: true });
+        outletRef.current?.scrollToOffset({ offset: next * outletStride, animated: true });
         return next;
       });
     }, 5_500);
@@ -412,358 +411,381 @@ export default function HomeTab() {
 
   return (
     <Screen edges={["top"]}>
-      <ScrollView
+      <FlatList
+        data={[]}
+        renderItem={() => null}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => {
-              void featured.refetch();
-              void trending.refetch();
-              void outlets.refetch();
-              if (coords) void locatedOutlets.refetch();
-              void categoriesQuery.refetch();
-            }}
-            tintColor={color.textSecondary}
-          />
-        }
-      >
-        <View style={styles.header}>
-          <View>
-            <AppText variant="caption" color={color.textTertiary} style={styles.eyebrow}>
-              {timeGreeting.toUpperCase()}
-            </AppText>
-            <View style={styles.greetingRow}>
-              <AppText variant="h1" style={styles.greeting}>
-                {salutation}, {firstName}
-              </AppText>
-              {user?.verification_status === "approved" ? (
-                <Ionicons name="checkmark-circle" size={18} color={color.success} />
-              ) : null}
+        refreshing={refreshing}
+        onRefresh={() => {
+          void featured.refetch();
+          void trending.refetch();
+          void outlets.refetch();
+          if (coords) void locatedOutlets.refetch();
+          void categoriesQuery.refetch();
+        }}
+        ListHeaderComponent={
+          <>
+            <View style={styles.header}>
+              <View>
+                <AppText variant="caption" color={color.textTertiary} style={styles.eyebrow}>
+                  {timeGreeting.toUpperCase()}
+                </AppText>
+                <View style={styles.greetingRow}>
+                  <AppText variant="h1" style={styles.greeting}>
+                    {salutation}, {firstName}
+                  </AppText>
+                  {user?.verification_status === "approved" ? (
+                    <Ionicons name="checkmark-circle" size={18} color={color.success} />
+                  ) : null}
+                </View>
+              </View>
+              <Pressable
+                style={styles.avatar}
+                onPress={() => router.push("/(tabs)/profile")}
+                accessibilityRole="button"
+                accessibilityLabel="Open profile"
+              >
+                <StudentAvatar
+                  avatarKey={user?.avatar_key}
+                  name={user?.name || firstName}
+                  size={44}
+                />
+              </Pressable>
             </View>
-          </View>
-          <Pressable
-            style={styles.avatar}
-            onPress={() => router.push("/(tabs)/profile")}
-            accessibilityRole="button"
-            accessibilityLabel="Open profile"
-          >
-            <StudentAvatar avatarKey={user?.avatar_key} name={user?.name || firstName} size={44} />
-          </Pressable>
-        </View>
 
-        <Pressable
-          style={styles.search}
-          onPress={() => router.push("/(tabs)/explore")}
-          accessibilityRole="search"
-          accessibilityLabel="Search deals and outlets"
-        >
-          <Ionicons name="search" size={20} color={color.textSecondary} />
-          <AppText variant="body" color={color.textTertiary} style={styles.searchText}>
-            Search deals, cafés and stores
-          </AppText>
-          <View style={styles.searchFilter}>
-            <Ionicons name="options-outline" size={17} color={color.textSecondary} />
-          </View>
-        </Pressable>
+            <Pressable
+              style={styles.search}
+              onPress={() => router.push("/(tabs)/explore")}
+              accessibilityRole="search"
+              accessibilityLabel="Search deals and outlets"
+            >
+              <Ionicons name="search" size={20} color={color.textSecondary} />
+              <AppText variant="body" color={color.textTertiary} style={styles.searchText}>
+                Search deals, cafés and stores
+              </AppText>
+              <View style={styles.searchFilter}>
+                <Ionicons name="options-outline" size={17} color={color.textSecondary} />
+              </View>
+            </Pressable>
 
-        {spotlightOffers.length ? (
-          <View style={styles.spotlightSection}>
-            <View style={styles.spotlightHeading}>
-              <View style={styles.spotlightHeadingCopy}>
-                <AppText variant="h2">Today&apos;s picks</AppText>
-                <AppText variant="small" color={color.textTertiary}>
-                  Brands and local outlet deals
+            {spotlightOffers.length ? (
+              <View style={styles.spotlightSection}>
+                <View style={styles.spotlightHeading}>
+                  <View style={styles.spotlightHeadingCopy}>
+                    <AppText variant="h2">Today&apos;s picks</AppText>
+                    <AppText variant="small" color={color.textTertiary}>
+                      Brands and local outlet deals
+                    </AppText>
+                  </View>
+                </View>
+                <Animated.FlatList
+                  ref={spotlightRef}
+                  data={spotlightOffers}
+                  keyExtractor={(item) => item.id}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  snapToInterval={spotlightStride}
+                  decelerationRate="fast"
+                  disableIntervalMomentum
+                  contentContainerStyle={[
+                    styles.spotlightRail,
+                    { paddingHorizontal: spotlightSideInset },
+                  ]}
+                  scrollEventThrottle={16}
+                  onScroll={Animated.event(
+                    [{ nativeEvent: { contentOffset: { x: spotlightScrollX } } }],
+                    { useNativeDriver: true },
+                  )}
+                  onMomentumScrollEnd={(event) =>
+                    setSpotlightIndex(
+                      Math.max(
+                        0,
+                        Math.min(
+                          spotlightOffers.length - 1,
+                          Math.round(event.nativeEvent.contentOffset.x / spotlightStride),
+                        ),
+                      ),
+                    )
+                  }
+                  renderItem={({ item: offer, index }) => {
+                    const inputRange = [
+                      (index - 1) * spotlightStride,
+                      index * spotlightStride,
+                      (index + 1) * spotlightStride,
+                    ];
+                    const scale = spotlightScrollX.interpolate({
+                      inputRange,
+                      outputRange: [0.86, 1, 0.86],
+                      extrapolate: "clamp",
+                    });
+                    const opacity = spotlightScrollX.interpolate({
+                      inputRange,
+                      outputRange: [0.52, 1, 0.52],
+                      extrapolate: "clamp",
+                    });
+                    const translateY = spotlightScrollX.interpolate({
+                      inputRange,
+                      outputRange: [18, 0, 18],
+                      extrapolate: "clamp",
+                    });
+
+                    return (
+                      <Animated.View
+                        key={offer.id}
+                        style={[
+                          styles.spotlightItem,
+                          {
+                            width: spotlightStride,
+                            opacity,
+                            transform: [{ translateY }, { scale }],
+                          },
+                        ]}
+                      >
+                        <FeaturedHero
+                          offer={offer}
+                          width={spotlightWidth}
+                          onPress={() => router.push(`/offer/${offer.id}`)}
+                          onToggleSave={() => void toggleSave(offer)}
+                        />
+                      </Animated.View>
+                    );
+                  }}
+                />
+                <View
+                  style={styles.pagination}
+                  accessibilityLabel={`Spotlight item ${spotlightIndex + 1} of ${spotlightOffers.length}`}
+                >
+                  {spotlightOffers.map((offer, index) => (
+                    <View
+                      key={offer.id}
+                      style={[
+                        styles.paginationDot,
+                        index === spotlightIndex && styles.paginationDotActive,
+                      ]}
+                    />
+                  ))}
+                </View>
+              </View>
+            ) : (
+              <View style={styles.heroSkeleton} />
+            )}
+
+            <View style={styles.actionBar}>
+              {actions.map((action) => (
+                <Pressable
+                  key={action.label}
+                  style={({ pressed }) => [styles.action, pressed && styles.pressed]}
+                  onPress={() => router.push(action.route as never)}
+                  accessibilityRole="button"
+                  accessibilityLabel={action.label}
+                >
+                  <View style={styles.actionIcon}>
+                    <Image
+                      source={action.asset}
+                      style={styles.actionIconImage}
+                      resizeMode="contain"
+                    />
+                  </View>
+                  <AppText variant="small">{action.label}</AppText>
+                </Pressable>
+              ))}
+            </View>
+
+            <Pressable
+              style={styles.pointsRow}
+              onPress={() => router.push("/rewards" as never)}
+              accessibilityRole="button"
+              accessibilityLabel={`${user?.savvy_points_balance ?? 0} Savvy Points`}
+            >
+              <Ionicons name="sparkles-outline" size={18} color="#C7D2FE" />
+              <View style={styles.pointsCopy}>
+                <AppText variant="bodyMedium">
+                  {(user?.savvy_points_balance ?? 0).toLocaleString("en-IN")} Savvy Points
+                </AppText>
+                <AppText variant="caption" color={color.textTertiary}>
+                  See rewards and ways to earn
                 </AppText>
               </View>
-            </View>
-            <Animated.ScrollView
-              ref={spotlightRef}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              snapToInterval={spotlightStride}
-              decelerationRate="fast"
-              disableIntervalMomentum
-              contentContainerStyle={[
-                styles.spotlightRail,
-                { paddingHorizontal: spotlightSideInset },
-              ]}
-              scrollEventThrottle={16}
-              onScroll={Animated.event(
-                [{ nativeEvent: { contentOffset: { x: spotlightScrollX } } }],
-                { useNativeDriver: true },
-              )}
-              onMomentumScrollEnd={(event) =>
-                setSpotlightIndex(
-                  Math.max(
-                    0,
-                    Math.min(
-                      spotlightOffers.length - 1,
-                      Math.round(event.nativeEvent.contentOffset.x / spotlightStride),
-                    ),
-                  ),
-                )
-              }
-            >
-              {spotlightOffers.map((offer, index) => {
-                const inputRange = [
-                  (index - 1) * spotlightStride,
-                  index * spotlightStride,
-                  (index + 1) * spotlightStride,
-                ];
-                const scale = spotlightScrollX.interpolate({
-                  inputRange,
-                  outputRange: [0.86, 1, 0.86],
-                  extrapolate: "clamp",
-                });
-                const opacity = spotlightScrollX.interpolate({
-                  inputRange,
-                  outputRange: [0.52, 1, 0.52],
-                  extrapolate: "clamp",
-                });
-                const translateY = spotlightScrollX.interpolate({
-                  inputRange,
-                  outputRange: [18, 0, 18],
-                  extrapolate: "clamp",
-                });
+              <Ionicons name="chevron-forward" size={17} color={color.textTertiary} />
+            </Pressable>
 
-                return (
-                  <Animated.View
-                    key={offer.id}
-                    style={[
-                      styles.spotlightItem,
-                      { width: spotlightStride, opacity, transform: [{ translateY }, { scale }] },
-                    ]}
+            {campusPicks.length > 0 ? (
+              <View style={styles.outletsSection}>
+                <View style={[styles.sectionHeader, styles.outletsHeader]}>
+                  <View>
+                    <AppText variant="h2">Popular near campus</AppText>
+                    <AppText variant="small" color={color.textTertiary}>
+                      Student favourites, ready to explore.
+                    </AppText>
+                  </View>
+                  <Pressable
+                    onPress={() =>
+                      router.push({
+                        pathname: "/(tabs)/explore",
+                        params: { tab: "outlets" },
+                      } as never)
+                    }
+                    hitSlop={8}
                   >
-                    <FeaturedHero
+                    <AppText variant="small" color="#A5B4FC">
+                      See all
+                    </AppText>
+                  </Pressable>
+                </View>
+                <Animated.FlatList
+                  ref={outletRef}
+                  data={campusPicks}
+                  keyExtractor={(item) => item.id}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  snapToInterval={outletStride}
+                  decelerationRate="fast"
+                  disableIntervalMomentum
+                  contentContainerStyle={[
+                    styles.outletRail,
+                    { paddingHorizontal: outletSideInset },
+                  ]}
+                  scrollEventThrottle={16}
+                  onScroll={Animated.event(
+                    [{ nativeEvent: { contentOffset: { x: outletScrollX } } }],
+                    {
+                      useNativeDriver: true,
+                    },
+                  )}
+                  onMomentumScrollEnd={(event) =>
+                    setOutletIndex(
+                      Math.max(
+                        0,
+                        Math.min(
+                          campusPicks.length - 1,
+                          Math.round(event.nativeEvent.contentOffset.x / outletStride),
+                        ),
+                      ),
+                    )
+                  }
+                  renderItem={({ item: outlet, index }) => {
+                    const inputRange = [
+                      (index - 1) * outletStride,
+                      index * outletStride,
+                      (index + 1) * outletStride,
+                    ];
+                    const scale = outletScrollX.interpolate({
+                      inputRange,
+                      outputRange: [0.9, 1, 0.9],
+                      extrapolate: "clamp",
+                    });
+                    const opacity = outletScrollX.interpolate({
+                      inputRange,
+                      outputRange: [0.58, 1, 0.58],
+                      extrapolate: "clamp",
+                    });
+                    const translateY = outletScrollX.interpolate({
+                      inputRange,
+                      outputRange: [12, 0, 12],
+                      extrapolate: "clamp",
+                    });
+
+                    return (
+                      <Animated.View
+                        key={outlet.id}
+                        style={[
+                          styles.outletCarouselItem,
+                          { width: outletStride, opacity, transform: [{ translateY }, { scale }] },
+                        ]}
+                      >
+                        <OutletTile
+                          outlet={outlet}
+                          offer={campusOfferByOutletId.get(outlet.id)}
+                          width={outletWidth}
+                          onPress={() => router.push(`/outlet/${outlet.id}`)}
+                        />
+                      </Animated.View>
+                    );
+                  }}
+                />
+                {campusPicks.length > 1 ? (
+                  <View
+                    style={styles.outletPagination}
+                    accessibilityLabel={`Popular outlet ${outletIndex + 1} of ${campusPicks.length}`}
+                  >
+                    {campusPicks.map((outlet, index) => (
+                      <View
+                        key={outlet.id}
+                        style={[
+                          styles.paginationDot,
+                          index === outletIndex && styles.paginationDotActive,
+                        ]}
+                      />
+                    ))}
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+
+            {recommendations.length > 0 ? (
+              <View style={styles.recommendations}>
+                <View style={styles.sectionHeader}>
+                  <View>
+                    <AppText variant="h2">More for you</AppText>
+                    <AppText variant="small" color={color.textTertiary}>
+                      Picked from what students love.
+                    </AppText>
+                  </View>
+                  <Pressable onPress={() => router.push("/(tabs)/explore")} hitSlop={8}>
+                    <AppText variant="small" color="#A5B4FC">
+                      See all
+                    </AppText>
+                  </Pressable>
+                </View>
+                <View style={styles.offerStack}>
+                  {recommendations.map((offer) => (
+                    <OfferCard
+                      key={offer.id}
                       offer={offer}
-                      width={spotlightWidth}
                       onPress={() => router.push(`/offer/${offer.id}`)}
                       onToggleSave={() => void toggleSave(offer)}
                     />
-                  </Animated.View>
-                );
-              })}
-            </Animated.ScrollView>
-            <View
-              style={styles.pagination}
-              accessibilityLabel={`Spotlight item ${spotlightIndex + 1} of ${spotlightOffers.length}`}
-            >
-              {spotlightOffers.map((offer, index) => (
-                <View
-                  key={offer.id}
-                  style={[
-                    styles.paginationDot,
-                    index === spotlightIndex && styles.paginationDotActive,
-                  ]}
-                />
-              ))}
-            </View>
-          </View>
-        ) : (
-          <View style={styles.heroSkeleton} />
-        )}
-
-        <View style={styles.actionBar}>
-          {actions.map((action) => (
-            <Pressable
-              key={action.label}
-              style={({ pressed }) => [styles.action, pressed && styles.pressed]}
-              onPress={() => router.push(action.route as never)}
-              accessibilityRole="button"
-              accessibilityLabel={action.label}
-            >
-              <View style={styles.actionIcon}>
-                <Image source={action.asset} style={styles.actionIconImage} resizeMode="contain" />
-              </View>
-              <AppText variant="small">{action.label}</AppText>
-            </Pressable>
-          ))}
-        </View>
-
-        <Pressable
-          style={styles.pointsRow}
-          onPress={() => router.push("/rewards" as never)}
-          accessibilityRole="button"
-          accessibilityLabel={`${user?.savvy_points_balance ?? 0} Savvy Points`}
-        >
-          <Ionicons name="sparkles-outline" size={18} color="#C7D2FE" />
-          <View style={styles.pointsCopy}>
-            <AppText variant="bodyMedium">
-              {(user?.savvy_points_balance ?? 0).toLocaleString("en-IN")} Savvy Points
-            </AppText>
-            <AppText variant="caption" color={color.textTertiary}>
-              See rewards and ways to earn
-            </AppText>
-          </View>
-          <Ionicons name="chevron-forward" size={17} color={color.textTertiary} />
-        </Pressable>
-
-        {campusPicks.length > 0 ? (
-          <View style={styles.outletsSection}>
-            <View style={[styles.sectionHeader, styles.outletsHeader]}>
-              <View>
-                <AppText variant="h2">Popular near campus</AppText>
-                <AppText variant="small" color={color.textTertiary}>
-                  Student favourites, ready to explore.
-                </AppText>
-              </View>
-              <Pressable
-                onPress={() =>
-                  router.push({ pathname: "/(tabs)/explore", params: { tab: "outlets" } } as never)
-                }
-                hitSlop={8}
-              >
-                <AppText variant="small" color="#A5B4FC">
-                  See all
-                </AppText>
-              </Pressable>
-            </View>
-            <Animated.ScrollView
-              ref={outletRef}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              snapToInterval={outletStride}
-              decelerationRate="fast"
-              disableIntervalMomentum
-              contentContainerStyle={[styles.outletRail, { paddingHorizontal: outletSideInset }]}
-              scrollEventThrottle={16}
-              onScroll={Animated.event([{ nativeEvent: { contentOffset: { x: outletScrollX } } }], {
-                useNativeDriver: true,
-              })}
-              onMomentumScrollEnd={(event) =>
-                setOutletIndex(
-                  Math.max(
-                    0,
-                    Math.min(
-                      campusPicks.length - 1,
-                      Math.round(event.nativeEvent.contentOffset.x / outletStride),
-                    ),
-                  ),
-                )
-              }
-            >
-              {campusPicks.map((outlet, index) => {
-                const inputRange = [
-                  (index - 1) * outletStride,
-                  index * outletStride,
-                  (index + 1) * outletStride,
-                ];
-                const scale = outletScrollX.interpolate({
-                  inputRange,
-                  outputRange: [0.9, 1, 0.9],
-                  extrapolate: "clamp",
-                });
-                const opacity = outletScrollX.interpolate({
-                  inputRange,
-                  outputRange: [0.58, 1, 0.58],
-                  extrapolate: "clamp",
-                });
-                const translateY = outletScrollX.interpolate({
-                  inputRange,
-                  outputRange: [12, 0, 12],
-                  extrapolate: "clamp",
-                });
-
-                return (
-                  <Animated.View
-                    key={outlet.id}
-                    style={[
-                      styles.outletCarouselItem,
-                      { width: outletStride, opacity, transform: [{ translateY }, { scale }] },
-                    ]}
-                  >
-                    <OutletTile
-                      outlet={outlet}
-                      offer={campusOfferByOutletId.get(outlet.id)}
-                      width={outletWidth}
-                      onPress={() => router.push(`/outlet/${outlet.id}`)}
-                    />
-                  </Animated.View>
-                );
-              })}
-            </Animated.ScrollView>
-            {campusPicks.length > 1 ? (
-              <View
-                style={styles.outletPagination}
-                accessibilityLabel={`Popular outlet ${outletIndex + 1} of ${campusPicks.length}`}
-              >
-                {campusPicks.map((outlet, index) => (
-                  <View
-                    key={outlet.id}
-                    style={[
-                      styles.paginationDot,
-                      index === outletIndex && styles.paginationDotActive,
-                    ]}
-                  />
-                ))}
-              </View>
-            ) : null}
-          </View>
-        ) : null}
-
-        {recommendations.length > 0 ? (
-          <View style={styles.recommendations}>
-            <View style={styles.sectionHeader}>
-              <View>
-                <AppText variant="h2">More for you</AppText>
-                <AppText variant="small" color={color.textTertiary}>
-                  Picked from what students love.
-                </AppText>
-              </View>
-              <Pressable onPress={() => router.push("/(tabs)/explore")} hitSlop={8}>
-                <AppText variant="small" color="#A5B4FC">
-                  See all
-                </AppText>
-              </Pressable>
-            </View>
-            <View style={styles.offerStack}>
-              {recommendations.map((offer) => (
-                <OfferCard
-                  key={offer.id}
-                  offer={offer}
-                  onPress={() => router.push(`/offer/${offer.id}`)}
-                  onToggleSave={() => void toggleSave(offer)}
-                />
-              ))}
-            </View>
-            {categories.length > 0 ? (
-              <View style={styles.categorySection}>
-                <AppText variant="h3">Browse by category</AppText>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.categoryRail}
-                >
-                  {categories.map((category) => (
-                    <Pressable
-                      key={category.name}
-                      onPress={() =>
-                        router.push({
-                          pathname: "/(tabs)/explore",
-                          params: { tab: "deals", category: category.name },
-                        } as never)
-                      }
-                      style={({ pressed }) => [styles.categoryChip, pressed && styles.pressed]}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Browse ${category.name} deals`}
-                    >
-                      <Ionicons name="sparkles-outline" size={15} color="#D8B4FE" />
-                      <AppText variant="small" style={styles.categoryLabel}>
-                        {category.name}
-                      </AppText>
-                      <AppText variant="caption" color={color.textTertiary}>
-                        {category.count}
-                      </AppText>
-                    </Pressable>
                   ))}
-                </ScrollView>
+                </View>
+                {categories.length > 0 ? (
+                  <View style={styles.categorySection}>
+                    <AppText variant="h3">Browse by category</AppText>
+                    <FlatList
+                      horizontal
+                      data={categories}
+                      keyExtractor={(item) => item.name}
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={styles.categoryRail}
+                      renderItem={({ item: category }) => (
+                        <Pressable
+                          onPress={() =>
+                            router.push({
+                              pathname: "/(tabs)/explore",
+                              params: { tab: "deals", category: category.name },
+                            } as never)
+                          }
+                          style={({ pressed }) => [styles.categoryChip, pressed && styles.pressed]}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Browse ${category.name} deals`}
+                        >
+                          <Ionicons name="sparkles-outline" size={15} color="#D8B4FE" />
+                          <AppText variant="small" style={styles.categoryLabel}>
+                            {category.name}
+                          </AppText>
+                          <AppText variant="caption" color={color.textTertiary}>
+                            {category.count}
+                          </AppText>
+                        </Pressable>
+                      )}
+                    />
+                  </View>
+                ) : null}
               </View>
             ) : null}
-          </View>
-        ) : null}
-      </ScrollView>
+          </>
+        }
+      />
     </Screen>
   );
 }

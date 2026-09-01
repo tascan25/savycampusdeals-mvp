@@ -4,10 +4,10 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useState } from "react";
 import {
   ActivityIndicator,
+  FlatList,
   Image,
   Linking,
   Pressable,
-  ScrollView,
   StyleSheet,
   View,
 } from "react-native";
@@ -78,181 +78,189 @@ export default function OutletDetailScreen() {
 
   return (
     <Screen edges={["bottom"]}>
-      <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.heroWrap}>
-          <Image
-            source={{ uri: resolveMediaUrl(outlet.cover_url || outlet.image_url) }}
-            style={styles.hero}
-            resizeMode="cover"
-          />
-          <View style={styles.heroOverlay}>
-            <AppText variant="caption" color="rgba(255,255,255,0.75)" style={styles.eyebrow}>
-              {outlet.cuisine}
-            </AppText>
-            <AppText variant="h1">{outlet.name}</AppText>
-            <View style={styles.chipRow}>
-              <View style={styles.chip}>
-                <Ionicons name="star" size={11} color={color.amber} />
-                <AppText variant="caption" color={color.textPrimary}>
-                  {outlet.rating.toFixed(1)}
+      <FlatList
+        data={outlet.offers}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.content}
+        ListHeaderComponent={
+          <>
+            <View style={styles.heroWrap}>
+              <Image
+                source={{ uri: resolveMediaUrl(outlet.cover_url || outlet.image_url) }}
+                style={styles.hero}
+                resizeMode="cover"
+              />
+              <View style={styles.heroOverlay}>
+                <AppText variant="caption" color="rgba(255,255,255,0.75)" style={styles.eyebrow}>
+                  {outlet.cuisine}
                 </AppText>
-              </View>
-              <View style={styles.chip}>
-                <Ionicons name="location" size={11} color={color.textPrimary} />
-                <AppText variant="caption" color={color.textPrimary}>
-                  {outlet.city}
-                </AppText>
-              </View>
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.addressCard}>
-          <View style={styles.addressRow}>
-            <Ionicons name="location" size={16} color={color.success} />
-            <AppText variant="body" color={color.textSecondary} style={styles.addressText}>
-              {outlet.address}
-            </AppText>
-          </View>
-          {outlet.phone ? (
-            <View style={styles.addressRow}>
-              <Ionicons name="call" size={14} color={color.primary} />
-              <AppText variant="small" color={color.textSecondary}>
-                {outlet.phone}
-              </AppText>
-            </View>
-          ) : null}
-          <View style={styles.addressRow}>
-            <Ionicons name="time" size={14} color={color.primary} />
-            <AppText variant="small" color={color.textSecondary}>
-              {outlet.hours}
-            </AppText>
-          </View>
-          <Button
-            label="Get directions"
-            variant="secondary"
-            onPress={() => Linking.openURL(mapUrl)}
-          />
-        </View>
-
-        <View style={styles.dealsHeader}>
-          <AppText variant="h2">Available deals</AppText>
-          <AppText variant="caption" color={color.textTertiary}>
-            {outlet.offers.length} active
-          </AppText>
-        </View>
-
-        {outlet.already_redeemed_here ? (
-          <View style={styles.gateNotice}>
-            <Ionicons name="shield-checkmark" size={14} color={color.amber} />
-            <AppText variant="small" color={color.amber} style={styles.gateText}>
-              {outlet.claim_message ||
-                "You've already redeemed a deal here. You can claim a fresh one once this outlet posts a newer deal."}
-            </AppText>
-          </View>
-        ) : null}
-
-        {!canClaim ? (
-          <Pressable
-            onPress={() => router.push(getVerificationHref(user))}
-            accessibilityRole="button"
-            style={styles.gateNotice}
-          >
-            <Ionicons name="sparkles" size={14} color={color.primary} />
-            <AppText variant="small" color={color.primary} style={styles.gateText}>
-              Get verified to claim deals here. Verify now →
-            </AppText>
-          </Pressable>
-        ) : null}
-
-        {claimError ? (
-          <AppText
-            variant="small"
-            color={color.destructive}
-            accessibilityRole="alert"
-            style={styles.claimErrorText}
-          >
-            {claimError}
-          </AppText>
-        ) : null}
-
-        <View style={styles.dealsList}>
-          {outlet.offers.length === 0 ? (
-            <View style={styles.empty}>
-              <AppText variant="body" color={color.textSecondary}>
-                No active deals right now. Check back soon.
-              </AppText>
-            </View>
-          ) : null}
-          {outlet.offers.map((offer) => {
-            const coupon = claimedCoupons[offer.id];
-            const newlyClaimed = Boolean(coupon && !coupon.already_active);
-            const couponActive = Boolean(offer.active_coupon || coupon?.already_active);
-            const blocked = Boolean(offer.claim_blocked);
-            return (
-              <View key={offer.id} style={styles.dealCard}>
-                <View style={styles.dealHeader}>
-                  <Pressable
-                    style={({ pressed }) => [styles.dealInfo, pressed && styles.dealInfoPressed]}
-                    onPress={() => router.push(`/offer/${offer.id}`)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`View ${offer.title} details`}
-                  >
-                    <AppText variant="caption" color={color.success} style={styles.eyebrow}>
-                      {offer.category}
+                <AppText variant="h1">{outlet.name}</AppText>
+                <View style={styles.chipRow}>
+                  <View style={styles.chip}>
+                    <Ionicons name="star" size={11} color={color.amber} />
+                    <AppText variant="caption" color={color.textPrimary}>
+                      {outlet.rating.toFixed(1)}
                     </AppText>
-                    <AppText variant="bodyMedium">{offer.title}</AppText>
-                    <AppText variant="small" color={color.textSecondary} numberOfLines={2}>
-                      {offer.description}
+                  </View>
+                  <View style={styles.chip}>
+                    <Ionicons name="location" size={11} color={color.textPrimary} />
+                    <AppText variant="caption" color={color.textPrimary}>
+                      {outlet.city}
                     </AppText>
-                    {blocked && offer.claim_message ? (
-                      <AppText variant="caption" color={color.amber} style={styles.blockedText}>
-                        {offer.claim_message}
-                      </AppText>
-                    ) : null}
-                    <View style={styles.viewDetailsRow}>
-                      <AppText variant="caption" color="#A5B4FC">
-                        View deal details
-                      </AppText>
-                      <Ionicons name="chevron-forward" size={13} color="#A5B4FC" />
-                    </View>
-                  </Pressable>
-                  <View style={styles.dealAction}>
-                    <AppText variant="h3">{offer.discount}</AppText>
-                    {couponActive && !newlyClaimed ? (
-                      <View style={styles.activeAction}>
-                        <View style={styles.activeBadge}>
-                          <Ionicons name="checkmark-circle" size={13} color={color.success} />
-                          <AppText variant="caption" color={color.success}>
-                            Coupon active
-                          </AppText>
-                        </View>
-                        <Pressable
-                          onPress={() => router.push("/(tabs)/wallet")}
-                          accessibilityRole="button"
-                          accessibilityLabel="View active coupon in Wallet"
-                          style={({ pressed }) => [styles.walletButton, pressed && styles.activePressed]}
-                        >
-                          <Ionicons name="wallet-outline" size={13} color={color.textPrimary} />
-                          <AppText variant="caption">View in Wallet</AppText>
-                        </Pressable>
-                      </View>
-                    ) : !newlyClaimed ? (
-                      <Button
-                        label="Claim"
-                        onPress={() => claim(offer.id)}
-                        loading={claimingId === offer.id}
-                        disabled={claimingId === offer.id || blocked || !canClaim}
-                      />
-                    ) : null}
                   </View>
                 </View>
-                {newlyClaimed && coupon ? <ClaimSuccessCard coupon={coupon} /> : null}
               </View>
-            );
-          })}
-        </View>
-      </ScrollView>
+            </View>
+
+            <View style={styles.addressCard}>
+              <View style={styles.addressRow}>
+                <Ionicons name="location" size={16} color={color.success} />
+                <AppText variant="body" color={color.textSecondary} style={styles.addressText}>
+                  {outlet.address}
+                </AppText>
+              </View>
+              {outlet.phone ? (
+                <View style={styles.addressRow}>
+                  <Ionicons name="call" size={14} color={color.primary} />
+                  <AppText variant="small" color={color.textSecondary}>
+                    {outlet.phone}
+                  </AppText>
+                </View>
+              ) : null}
+              <View style={styles.addressRow}>
+                <Ionicons name="time" size={14} color={color.primary} />
+                <AppText variant="small" color={color.textSecondary}>
+                  {outlet.hours}
+                </AppText>
+              </View>
+              <Button
+                label="Get directions"
+                variant="secondary"
+                onPress={() => Linking.openURL(mapUrl)}
+              />
+            </View>
+
+            <View style={styles.dealsHeader}>
+              <AppText variant="h2">Available deals</AppText>
+              <AppText variant="caption" color={color.textTertiary}>
+                {outlet.offers.length} active
+              </AppText>
+            </View>
+
+            {outlet.already_redeemed_here ? (
+              <View style={styles.gateNotice}>
+                <Ionicons name="shield-checkmark" size={14} color={color.amber} />
+                <AppText variant="small" color={color.amber} style={styles.gateText}>
+                  {outlet.claim_message ||
+                    "You've already redeemed a deal here. You can claim a fresh one once this outlet posts a newer deal."}
+                </AppText>
+              </View>
+            ) : null}
+
+            {!canClaim ? (
+              <Pressable
+                onPress={() => router.push(getVerificationHref(user))}
+                accessibilityRole="button"
+                style={styles.gateNotice}
+              >
+                <Ionicons name="sparkles" size={14} color={color.primary} />
+                <AppText variant="small" color={color.primary} style={styles.gateText}>
+                  Get verified to claim deals here. Verify now →
+                </AppText>
+              </Pressable>
+            ) : null}
+
+            {claimError ? (
+              <AppText
+                variant="small"
+                color={color.destructive}
+                accessibilityRole="alert"
+                style={styles.claimErrorText}
+              >
+                {claimError}
+              </AppText>
+            ) : null}
+          </>
+        }
+        ListEmptyComponent={
+          <View style={styles.empty}>
+            <AppText variant="body" color={color.textSecondary}>
+              No active deals right now. Check back soon.
+            </AppText>
+          </View>
+        }
+        renderItem={({ item: offer, index }) => {
+          const coupon = claimedCoupons[offer.id];
+          const newlyClaimed = Boolean(coupon && !coupon.already_active);
+          const couponActive = Boolean(offer.active_coupon || coupon?.already_active);
+          const blocked = Boolean(offer.claim_blocked);
+          return (
+            <View style={[styles.dealCard, index === 0 && styles.firstDealCard]}>
+              <View style={styles.dealHeader}>
+                <Pressable
+                  style={({ pressed }) => [styles.dealInfo, pressed && styles.dealInfoPressed]}
+                  onPress={() => router.push(`/offer/${offer.id}`)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`View ${offer.title} details`}
+                >
+                  <AppText variant="caption" color={color.success} style={styles.eyebrow}>
+                    {offer.category}
+                  </AppText>
+                  <AppText variant="bodyMedium">{offer.title}</AppText>
+                  <AppText variant="small" color={color.textSecondary} numberOfLines={2}>
+                    {offer.description}
+                  </AppText>
+                  {blocked && offer.claim_message ? (
+                    <AppText variant="caption" color={color.amber} style={styles.blockedText}>
+                      {offer.claim_message}
+                    </AppText>
+                  ) : null}
+                  <View style={styles.viewDetailsRow}>
+                    <AppText variant="caption" color="#A5B4FC">
+                      View deal details
+                    </AppText>
+                    <Ionicons name="chevron-forward" size={13} color="#A5B4FC" />
+                  </View>
+                </Pressable>
+                <View style={styles.dealAction}>
+                  <AppText variant="h3">{offer.discount}</AppText>
+                  {couponActive && !newlyClaimed ? (
+                    <View style={styles.activeAction}>
+                      <View style={styles.activeBadge}>
+                        <Ionicons name="checkmark-circle" size={13} color={color.success} />
+                        <AppText variant="caption" color={color.success}>
+                          Coupon active
+                        </AppText>
+                      </View>
+                      <Pressable
+                        onPress={() => router.push("/(tabs)/wallet")}
+                        accessibilityRole="button"
+                        accessibilityLabel="View active coupon in Wallet"
+                        style={({ pressed }) => [
+                          styles.walletButton,
+                          pressed && styles.activePressed,
+                        ]}
+                      >
+                        <Ionicons name="wallet-outline" size={13} color={color.textPrimary} />
+                        <AppText variant="caption">View in Wallet</AppText>
+                      </Pressable>
+                    </View>
+                  ) : !newlyClaimed ? (
+                    <Button
+                      label="Claim"
+                      onPress={() => claim(offer.id)}
+                      loading={claimingId === offer.id}
+                      disabled={claimingId === offer.id || blocked || !canClaim}
+                    />
+                  ) : null}
+                </View>
+              </View>
+              {newlyClaimed && coupon ? <ClaimSuccessCard coupon={coupon} /> : null}
+            </View>
+          );
+        }}
+        ItemSeparatorComponent={() => <View style={styles.dealSeparator} />}
+      />
     </Screen>
   );
 }
@@ -300,9 +308,10 @@ const styles = StyleSheet.create({
   },
   gateText: { flex: 1 },
   claimErrorText: { marginHorizontal: space.lg, marginTop: space.sm },
-  dealsList: { padding: space.lg, gap: space.md },
-  empty: { padding: space.xl, alignItems: "center" },
+  empty: { margin: space.lg, padding: space.xl, alignItems: "center" },
+  dealSeparator: { height: space.md },
   dealCard: {
+    marginHorizontal: space.lg,
     borderRadius: radius.lg,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: color.border,
@@ -310,6 +319,7 @@ const styles = StyleSheet.create({
     padding: space.md,
     gap: space.md,
   },
+  firstDealCard: { marginTop: space.lg },
   dealHeader: { flexDirection: "row", gap: space.md },
   dealInfo: { flex: 1, gap: 4 },
   dealInfoPressed: { opacity: 0.72 },

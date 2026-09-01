@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Pressable, StyleSheet, View } from "react-native";
+import { FlatList, Pressable, StyleSheet, View } from "react-native";
 
 import { AppText } from "@/design-system/components";
 import { color, minTouchTarget, radius, space } from "@/design-system/tokens";
@@ -23,10 +23,12 @@ export function WaysToEarnList({
   onCopyReferral: (code: string) => void;
 }) {
   return (
-    <View style={styles.list}>
-      {ways.map((way) => (
+    <FlatList
+      data={ways}
+      keyExtractor={(item) => item.type}
+      scrollEnabled={false}
+      renderItem={({ item: way }) => (
         <Pressable
-          key={way.type}
           onPress={() =>
             way.type === "refer" ? onCopyReferral(way.referral_code) : onNavigate(way.href)
           }
@@ -62,13 +64,14 @@ export function WaysToEarnList({
             </AppText>
           </View>
         </Pressable>
-      ))}
-    </View>
+      )}
+      ItemSeparatorComponent={() => <View style={styles.separator} />}
+    />
   );
 }
 
 const styles = StyleSheet.create({
-  list: { gap: space.sm },
+  separator: { height: space.sm },
   row: {
     flexDirection: "row",
     alignItems: "center",

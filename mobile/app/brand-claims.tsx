@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Linking, ScrollView, StyleSheet, View } from "react-native";
+import { FlatList, Linking, StyleSheet, View } from "react-native";
 
 import { apiListBrandOfferClaims } from "@/api/coupons";
 import { apiClaimOffer } from "@/api/offers";
@@ -10,7 +10,10 @@ import { color, space } from "@/design-system/tokens";
 import { isBrandOfferClaim } from "@/types/offer";
 
 export default function BrandClaimsScreen() {
-  const claims = useQuery({ queryKey: queryKeys.coupons.brandClaims(), queryFn: apiListBrandOfferClaims });
+  const claims = useQuery({
+    queryKey: queryKeys.coupons.brandClaims(),
+    queryFn: apiListBrandOfferClaims,
+  });
 
   const reopen = async (offerId: string, fallbackUrl: string) => {
     const result = await apiClaimOffer(offerId);
@@ -20,19 +23,38 @@ export default function BrandClaimsScreen() {
 
   return (
     <Screen edges={["bottom"]}>
-      <ScrollView contentContainerStyle={styles.content}>
-        <AppText variant="small" color={color.textTertiary}>These offers are completed securely on the brand&apos;s official website.</AppText>
-        <View style={styles.list}>
-          {(claims.data ?? []).map((claim) => <BrandClaimListItem key={claim.id} claim={claim} continuing={false} onContinue={() => void reopen(claim.offer_id, claim.official_url)} />)}
-        </View>
-        {!claims.isLoading && (claims.data?.length ?? 0) === 0 ? <AppText variant="body" color={color.textSecondary} style={styles.empty}>No claimed online offers yet.</AppText> : null}
-      </ScrollView>
+      <FlatList
+        data={claims.data ?? []}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.content}
+        renderItem={({ item }) => (
+          <BrandClaimListItem
+            claim={item}
+            continuing={false}
+            onContinue={() => void reopen(item.offer_id, item.official_url)}
+          />
+        )}
+        ItemSeparatorComponent={() => <View style={styles.separator} />}
+        ListHeaderComponent={
+          <AppText variant="small" color={color.textTertiary} style={styles.header}>
+            These offers are completed securely on the brand&apos;s official website.
+          </AppText>
+        }
+        ListEmptyComponent={
+          !claims.isLoading ? (
+            <AppText variant="body" color={color.textSecondary} style={styles.empty}>
+              No claimed online offers yet.
+            </AppText>
+          ) : null
+        }
+      />
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  content: { padding: space.lg, gap: space.lg },
-  list: { gap: space.md },
+  content: { padding: space.lg },
+  header: { marginBottom: space.lg },
+  separator: { height: space.md },
   empty: { paddingVertical: space.xxl, textAlign: "center" },
 });

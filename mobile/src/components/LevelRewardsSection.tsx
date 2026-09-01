@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useMemo, useState } from "react";
-import { Image, ScrollView, StyleSheet, View } from "react-native";
+import { FlatList, Image, StyleSheet, View } from "react-native";
 
 import { AppText, Chip } from "@/design-system/components";
 import { color, radius, space } from "@/design-system/tokens";
@@ -62,8 +62,13 @@ export function LevelRewardsSection({
   return (
     <View style={styles.container}>
       <AppText variant="h3">Reward collection</AppText>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
-        {rewardTiers.map((tier) => (
+      <FlatList
+        horizontal
+        data={rewardTiers}
+        keyExtractor={(item) => item.key}
+        showsHorizontalScrollIndicator={false}
+        style={styles.chipRow}
+        renderItem={({ item: tier }) => (
           <View key={tier.key} style={styles.chipGap}>
             <Chip
               label={tier.name}
@@ -71,8 +76,8 @@ export function LevelRewardsSection({
               onPress={() => setSelectedKey(tier.key)}
             />
           </View>
-        ))}
-      </ScrollView>
+        )}
+      />
 
       <View style={styles.spotlight}>
         <View style={styles.spotlightHeader}>

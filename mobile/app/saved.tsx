@@ -1,9 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
-import { FlashList } from "@shopify/flash-list";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { FlatList, Pressable, StyleSheet, View } from "react-native";
 
 import { apiListSavedOffers, apiToggleSaveOffer } from "@/api/offers";
 import { queryKeys } from "@/api/queryKeys";
@@ -97,7 +96,7 @@ export default function SavedOffersScreen() {
 
   return (
     <Screen edges={["bottom"]}>
-      <FlashList
+      <FlatList
         data={savedQuery.data ?? []}
         keyExtractor={(offer) => offer.id}
         contentContainerStyle={styles.content}
