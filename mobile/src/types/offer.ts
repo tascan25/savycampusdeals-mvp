@@ -21,6 +21,11 @@ export type Offer = {
   offer_type: "partner_outlet" | "listed_brand";
   disclaimer: string;
   redemption_policy: string;
+  active_coupon?: {
+    id: string;
+    status: "active";
+    expires_at: string | null;
+  } | null;
   created_at: string | null;
   /** Only present on GET /offers/{id} for an outlet offer. */
   outlet_hours?: string;
@@ -51,6 +56,8 @@ export type CouponClaimResult = {
   created_at: string | null;
   expires_at: string | null;
   redeemed_at: string | null;
+  /** True when POST /claim returned the coupon that was already active. */
+  already_active?: boolean;
 };
 
 /** Mirrors serialize_brand_offer_claim() — returned by POST /offers/{id}/claim for a listed_brand offer. */

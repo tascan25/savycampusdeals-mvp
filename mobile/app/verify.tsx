@@ -24,6 +24,7 @@ import { VerificationImagePicker } from "@/components/VerificationImagePicker";
 import { AppText, Screen } from "@/design-system/components";
 import { color, radius, space } from "@/design-system/tokens";
 import { useAuth } from "@/providers/AuthProvider";
+import { presentVerificationSubmittedNotification } from "@/services/localNotifications";
 import { verificationFormSchema, type VerificationFormValues } from "@/validation/verification";
 
 function VerificationShell({
@@ -229,11 +230,14 @@ export default function VerifyScreen() {
       return;
     }
     try {
-      await apiSubmitVerification({
+      const result = await apiSubmitVerification({
         ...values,
         college_id_image: collegeIdImage,
         selfie_image: selfieImage,
       });
+      if (!result.already_submitted) {
+        await presentVerificationSubmittedNotification().catch(() => false);
+      }
       await refreshUser();
     } catch (error) {
       setFormError(toApiError(error).message);

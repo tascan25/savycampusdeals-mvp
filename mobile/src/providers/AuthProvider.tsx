@@ -18,6 +18,7 @@ import {
   saveSessionFromResponse,
 } from "@/services/session";
 import { getPushInstallationId } from "@/services/installation";
+import { cancelAllManagedLocalNotifications } from "@/services/localNotifications";
 import { unregisterNativePushToken } from "@/services/pushLifecycle";
 import type { User } from "@/types/user";
 
@@ -90,6 +91,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       const installationId = await getPushInstallationId().catch(() => undefined);
       await apiLogout(session.refreshToken, installationId).catch(() => undefined);
     }
+    await cancelAllManagedLocalNotifications().catch(() => undefined);
     await unregisterNativePushToken().catch(() => undefined);
     await endSession();
     setUser(null);
@@ -97,6 +99,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   const logoutAllDevices = useCallback(async () => {
     await apiLogoutAll().catch(() => undefined);
+    await cancelAllManagedLocalNotifications().catch(() => undefined);
     await unregisterNativePushToken().catch(() => undefined);
     await endSession();
     setUser(null);
@@ -114,6 +117,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   const deleteAccount = useCallback(async (password: string) => {
     await apiDeleteAccount(password, "DELETE");
+    await cancelAllManagedLocalNotifications().catch(() => undefined);
     await unregisterNativePushToken().catch(() => undefined);
     await endSession();
     setUser(null);

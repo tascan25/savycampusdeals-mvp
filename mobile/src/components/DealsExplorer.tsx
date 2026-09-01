@@ -10,6 +10,8 @@ import { OfferCard } from "@/components/OfferCard";
 import { AppText, Chip, SearchField } from "@/design-system/components";
 import { color, space } from "@/design-system/tokens";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { useAuth } from "@/providers/AuthProvider";
+import { cancelSavedOfferReminder } from "@/services/localNotifications";
 import type { Offer, OfferSort } from "@/types/offer";
 
 const SORTS: { value: OfferSort; label: string }[] = [
@@ -21,6 +23,7 @@ const SORTS: { value: OfferSort; label: string }[] = [
 export function DealsExplorer({ initialCategory }: { initialCategory?: string }) {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState(initialCategory || "all");
   const [sort, setSort] = useState<OfferSort>("featured");
@@ -52,7 +55,8 @@ export function DealsExplorer({ initialCategory }: { initialCategory?: string })
   });
 
   const toggleSave = async (offer: Offer) => {
-    await apiToggleSaveOffer(offer.id);
+    const result = await apiToggleSaveOffer(offer.id);
+    if (!result.saved && user) await cancelSavedOfferReminder(user.id, offer.id);
     await queryClient.invalidateQueries({ queryKey: queryKeys.offers.all() });
   };
 

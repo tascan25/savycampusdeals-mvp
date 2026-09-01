@@ -32,7 +32,7 @@ export default function OfferDetail() {
     setClaiming(true);
     try {
       const { data } = await api.post(`/offers/${id}/claim`);
-      toast.success("Coupon ready!");
+      toast.success(data.already_active ? "Coupon is already active." : "Coupon ready!");
       nav("/coupons", { state: { justClaimed: data.id } });
     } catch (e) {
       toast.error(formatApiError(e.response?.data?.detail));
@@ -174,20 +174,34 @@ export default function OfferDetail() {
                 </div>
               )}
 
-              <button
-                data-testid="offer-claim-btn"
-                onClick={claim}
-                disabled={claiming || (user && !canClaim)}
-                className="mt-5 w-full inline-flex items-center justify-center gap-2 rounded-full bg-white text-black font-semibold py-3 hover:scale-[1.02] transition-transform disabled:opacity-60"
-              >
-                {claiming ? <Loader2 size={16} className="animate-spin"/> :
-                  offer.brand_url && !offer.outlet_id ? (
-                    <><ExternalLink size={16}/> {user ? "Claim & continue to website" : "Log in to claim"}</>
-                  ) : (
-                    <><Ticket size={16}/> {user ? "Claim coupon" : "Log in to claim"}</>
-                  )
-                }
-              </button>
+              {offer.active_coupon ? (
+                <div className="mt-5 space-y-3" data-testid="offer-active-state">
+                  <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1.5 text-sm font-semibold text-emerald-300">
+                    <ShieldCheck size={15}/> Coupon active
+                  </div>
+                  <button
+                    onClick={() => nav("/coupons")}
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-white text-black font-semibold py-3 hover:scale-[1.02] transition-transform"
+                  >
+                    <Ticket size={16}/> View in My Coupons
+                  </button>
+                </div>
+              ) : (
+                <button
+                  data-testid="offer-claim-btn"
+                  onClick={claim}
+                  disabled={claiming || (user && !canClaim)}
+                  className="mt-5 w-full inline-flex items-center justify-center gap-2 rounded-full bg-white text-black font-semibold py-3 hover:scale-[1.02] transition-transform disabled:opacity-60"
+                >
+                  {claiming ? <Loader2 size={16} className="animate-spin"/> :
+                    offer.brand_url && !offer.outlet_id ? (
+                      <><ExternalLink size={16}/> {user ? "Claim & continue to website" : "Log in to claim"}</>
+                    ) : (
+                      <><Ticket size={16}/> {user ? "Claim coupon" : "Log in to claim"}</>
+                    )
+                  }
+                </button>
+              )}
               {offer.brand_url && !offer.outlet_id && user && canClaim && (
                 <div className="mt-2 text-[11px] text-zinc-500 text-center">
                   You'll be redirected to <span className="text-white">{officialHost}</span> to activate.

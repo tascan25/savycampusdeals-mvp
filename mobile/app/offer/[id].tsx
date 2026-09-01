@@ -22,6 +22,11 @@ import { ClaimSuccessCard } from "@/components/ClaimSuccessCard";
 import { AppText, Button, Screen } from "@/design-system/components";
 import { color, radius, space } from "@/design-system/tokens";
 import { useAuth } from "@/providers/AuthProvider";
+import { usePushNotifications } from "@/providers/PushNotificationProvider";
+import {
+  cancelSavedOfferReminder,
+  presentClaimReadyNotification,
+} from "@/services/localNotifications";
 import { isBrandOfferClaim, type ClaimResult } from "@/types/offer";
 import { resolveMediaUrl } from "@/utils/media";
 import { getVerificationHref } from "@/utils/verificationRoute";
@@ -29,6 +34,7 @@ import { getVerificationHref } from "@/utils/verificationRoute";
 export default function OfferDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useAuth();
+  const { reconcileReminders } = usePushNotifications();
   const router = useRouter();
   const queryClient = useQueryClient();
   const [claiming, setClaiming] = useState(false);
@@ -49,7 +55,8 @@ export default function OfferDetailScreen() {
 
   const toggleSave = async () => {
     if (!offer) return;
-    await apiToggleSaveOffer(offer.id);
+    const result = await apiToggleSaveOffer(offer.id);
+    if (!result.saved && user) await cancelSavedOfferReminder(user.id, offer.id);
     await invalidateOffers();
   };
 
@@ -63,6 +70,10 @@ export default function OfferDetailScreen() {
     try {
       const result = await apiClaimOffer(offer.id);
       await invalidateOffers();
+      if (isBrandOfferClaim(result) || !result.already_active) {
+        void presentClaimReadyNotification(result).catch(() => undefined);
+      }
+      void reconcileReminders().catch(() => undefined);
       return result;
     } catch (error) {
       setClaimError(toApiError(error).message);
@@ -101,6 +112,10 @@ export default function OfferDetailScreen() {
 
   const validity = offer.validity?.trim() || "Ongoing";
   const claimButtonLabel = isListedBrand ? "Claim & visit website" : "Claim this deal";
+  const couponResult =
+    claimResult && !isBrandOfferClaim(claimResult) ? claimResult : null;
+  const newlyClaimed = Boolean(couponResult && !couponResult.already_active);
+  const couponActive = Boolean(offer.active_coupon || couponResult?.already_active);
 
   return (
     <Screen edges={[]}>
@@ -210,10 +225,22 @@ export default function OfferDetailScreen() {
             </View>
           ) : null}
 
-          {claimResult && !isBrandOfferClaim(claimResult) ? (
+          {newlyClaimed && couponResult ? (
             <View style={styles.successWrap}>
-              <ClaimSuccessCard coupon={claimResult} />
+              <ClaimSuccessCard coupon={couponResult} />
             </View>
+          ) : couponActive ? (
+            <Pressable
+              onPress={() => router.push("/(tabs)/wallet")}
+              accessibilityRole="button"
+              accessibilityLabel="Coupon active. View in Wallet"
+              style={({ pressed }) => [styles.activeBadge, pressed && styles.activePressed]}
+            >
+              <Ionicons name="checkmark-circle" size={15} color={color.success} />
+              <AppText variant="small" color={color.success}>
+                Coupon active
+              </AppText>
+            </Pressable>
           ) : (
             <>
               {!canClaim ? (
@@ -411,6 +438,19 @@ const styles = StyleSheet.create({
   },
   noticeText: { flex: 1 },
   successWrap: { marginTop: space.sm },
+  activeBadge: {
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: radius.pill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(84,212,155,0.4)",
+    backgroundColor: "rgba(84,212,155,0.1)",
+  },
+  activePressed: { opacity: 0.72 },
   termsText: { lineHeight: 20 },
   modalBackdrop: {
     flex: 1,

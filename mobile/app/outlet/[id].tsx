@@ -20,6 +20,8 @@ import { ClaimSuccessCard } from "@/components/ClaimSuccessCard";
 import { AppText, Button, Screen } from "@/design-system/components";
 import { color, radius, space } from "@/design-system/tokens";
 import { useAuth } from "@/providers/AuthProvider";
+import { usePushNotifications } from "@/providers/PushNotificationProvider";
+import { presentClaimReadyNotification } from "@/services/localNotifications";
 import { isBrandOfferClaim, type CouponClaimResult } from "@/types/offer";
 import { resolveMediaUrl } from "@/utils/media";
 import { getVerificationHref } from "@/utils/verificationRoute";
@@ -27,6 +29,7 @@ import { getVerificationHref } from "@/utils/verificationRoute";
 export default function OutletDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useAuth();
+  const { reconcileReminders } = usePushNotifications();
   const router = useRouter();
   const queryClient = useQueryClient();
   const [claimingId, setClaimingId] = useState<string | null>(null);
@@ -49,7 +52,11 @@ export default function OutletDetailScreen() {
       if (!isBrandOfferClaim(result)) {
         setClaimedCoupons((prev) => ({ ...prev, [offerId]: result }));
       }
+      if (isBrandOfferClaim(result) || !result.already_active) {
+        void presentClaimReadyNotification(result).catch(() => undefined);
+      }
       await queryClient.invalidateQueries({ queryKey: queryKeys.outlets.detail(id) });
+      void reconcileReminders().catch(() => undefined);
     } catch (error) {
       setClaimError(toApiError(error).message);
     } finally {
@@ -179,6 +186,8 @@ export default function OutletDetailScreen() {
           ) : null}
           {outlet.offers.map((offer) => {
             const coupon = claimedCoupons[offer.id];
+            const newlyClaimed = Boolean(coupon && !coupon.already_active);
+            const couponActive = Boolean(offer.active_coupon || coupon?.already_active);
             const blocked = Boolean(offer.claim_blocked);
             return (
               <View key={offer.id} style={styles.dealCard}>
@@ -210,7 +219,19 @@ export default function OutletDetailScreen() {
                   </Pressable>
                   <View style={styles.dealAction}>
                     <AppText variant="h3">{offer.discount}</AppText>
-                    {!coupon ? (
+                    {couponActive && !newlyClaimed ? (
+                      <Pressable
+                        onPress={() => router.push("/(tabs)/wallet")}
+                        accessibilityRole="button"
+                        accessibilityLabel="Coupon active. View in Wallet"
+                        style={({ pressed }) => [styles.activeBadge, pressed && styles.activePressed]}
+                      >
+                        <Ionicons name="checkmark-circle" size={13} color={color.success} />
+                        <AppText variant="caption" color={color.success}>
+                          Coupon active
+                        </AppText>
+                      </Pressable>
+                    ) : !newlyClaimed ? (
                       <Button
                         label="Claim"
                         onPress={() => claim(offer.id)}
@@ -220,7 +241,7 @@ export default function OutletDetailScreen() {
                     ) : null}
                   </View>
                 </View>
-                {coupon ? <ClaimSuccessCard coupon={coupon} /> : null}
+                {newlyClaimed && coupon ? <ClaimSuccessCard coupon={coupon} /> : null}
               </View>
             );
           })}
@@ -289,4 +310,16 @@ const styles = StyleSheet.create({
   viewDetailsRow: { marginTop: space.sm, flexDirection: "row", alignItems: "center", gap: 3 },
   blockedText: { marginTop: 4 },
   dealAction: { alignItems: "flex-end", gap: space.sm, minWidth: 110 },
+  activeBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(84,212,155,0.4)",
+    backgroundColor: "rgba(84,212,155,0.1)",
+  },
+  activePressed: { opacity: 0.72 },
 });

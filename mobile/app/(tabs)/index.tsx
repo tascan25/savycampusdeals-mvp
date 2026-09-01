@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -21,6 +22,7 @@ import { StudentAvatar } from "@/components/StudentAvatar";
 import { AppText, Screen } from "@/design-system/components";
 import { color, radius, space } from "@/design-system/tokens";
 import { useAuth } from "@/providers/AuthProvider";
+import { cancelSavedOfferReminder } from "@/services/localNotifications";
 import { getCurrentCoordsIfGranted, type Coords } from "@/services/location";
 import type { Offer } from "@/types/offer";
 import type { Outlet } from "@/types/outlet";
@@ -104,16 +106,24 @@ function FeaturedHero({
 const actions = [
   {
     label: "All deals",
-    icon: "pricetags-outline" as const,
+    asset: require("../../assets/home-shortcuts/all-deals.png"),
     route: { pathname: "/(tabs)/explore", params: { tab: "deals" } },
   },
   {
     label: "Nearby",
-    icon: "navigate-outline" as const,
+    asset: require("../../assets/home-shortcuts/nearby.png"),
     route: { pathname: "/(tabs)/explore", params: { tab: "outlets" } },
   },
-  { label: "Saved", icon: "bookmark-outline" as const, route: { pathname: "/saved" } },
-  { label: "Student ID", icon: "card-outline" as const, route: { pathname: "/(tabs)/card" } },
+  {
+    label: "Saved",
+    asset: require("../../assets/home-shortcuts/saved.png"),
+    route: { pathname: "/saved" },
+  },
+  {
+    label: "Student ID",
+    asset: require("../../assets/home-shortcuts/student-id.png"),
+    route: { pathname: "/(tabs)/card" },
+  },
 ];
 
 const SPOTLIGHT_BRANDS = ["IndiGo", "Air India", "GitHub", "Cult.fit", "Spotify"] as const;
@@ -135,14 +145,23 @@ function formatDistanceFromYou(outlet: Outlet): string | null {
 
 function OutletTile({
   outlet,
+  offer,
   width,
   onPress,
 }: {
   outlet: Outlet;
+  offer?: Offer;
   width: number;
   onPress: () => void;
 }) {
   const distanceLabel = formatDistanceFromYou(outlet);
+  const offerLead =
+    offer?.discount ||
+    `${outlet.offer_count} student ${outlet.offer_count === 1 ? "deal" : "deals"}`;
+  const offerDetail = outlet.tagline || offer?.title || outlet.cuisine;
+  const locationLabel = [distanceLabel, outlet.address || outlet.city]
+    .filter(Boolean)
+    .join("  |  ");
 
   return (
     <Pressable
@@ -151,26 +170,46 @@ function OutletTile({
       accessibilityRole="button"
       accessibilityLabel={`Open ${outlet.name}`}
     >
-      <Image
-        source={{ uri: resolveMediaUrl(outlet.image_url || outlet.logo_url) }}
-        style={styles.outletImage}
-      />
-      <View style={styles.outletShade} />
-      <View style={styles.outletRating}>
-        <Ionicons name="star" size={11} color="#FBBF24" />
-        <AppText variant="caption">{outlet.rating.toFixed(1)}</AppText>
+      <View style={styles.outletVisual}>
+        <Image
+          source={{ uri: resolveMediaUrl(outlet.image_url || outlet.logo_url) }}
+          style={styles.outletImage}
+        />
+        <View style={styles.outletShade} />
+        <View style={styles.outletRating}>
+          <Ionicons name="star" size={12} color="#FBBF24" />
+          <AppText variant="caption" style={styles.outletRatingText}>
+            {outlet.rating.toFixed(1)}
+          </AppText>
+        </View>
+        <View style={styles.outletOpenButton}>
+          <Ionicons name="arrow-forward" size={20} color="#FFFFFF" />
+        </View>
       </View>
+
+      <LinearGradient
+        colors={["#5B21E8", "#38139B", "#151124"]}
+        start={{ x: 0, y: 0.5 }}
+        end={{ x: 1, y: 0.5 }}
+        style={styles.outletOfferStrip}
+      >
+        <Ionicons name="pricetag" size={16} color="#FFFFFF" />
+        <AppText style={styles.outletOfferText} numberOfLines={1}>
+          <AppText style={styles.outletOfferLead}>{offerLead}</AppText>
+          {offerDetail ? `  •  ${offerDetail}` : ""}
+        </AppText>
+      </LinearGradient>
+
       <View style={styles.outletCopy}>
         <AppText style={styles.outletName} numberOfLines={1}>
           {outlet.name}
         </AppText>
-        <AppText style={styles.outletCampus} numberOfLines={1}>
-          {outlet.city || "Near campus"}
-        </AppText>
-        <AppText style={styles.outletMeta} numberOfLines={1}>
-          {distanceLabel ? `${distanceLabel} · ` : ""}
-          {outlet.offer_count} {outlet.offer_count === 1 ? "deal" : "deals"} · {outlet.cuisine}
-        </AppText>
+        <View style={styles.outletLocationRow}>
+          <Ionicons name="location-outline" size={14} color={color.textTertiary} />
+          <AppText style={styles.outletMeta} numberOfLines={1}>
+            {locationLabel || outlet.city || "Near campus"}
+          </AppText>
+        </View>
       </View>
     </Pressable>
   );
@@ -181,10 +220,13 @@ export default function HomeTab() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const spotlightRef = useRef<ScrollView>(null);
+  const outletRef = useRef<ScrollView>(null);
   const [spotlightScrollX] = useState(() => new Animated.Value(0));
+  const [outletScrollX] = useState(() => new Animated.Value(0));
   const { width: viewportWidth } = useWindowDimensions();
   const [now, setNow] = useState(() => new Date());
   const [spotlightIndex, setSpotlightIndex] = useState(0);
+  const [outletIndex, setOutletIndex] = useState(0);
   const [coords, setCoords] = useState<Coords | null>(null);
   const featured = useQuery({
     queryKey: queryKeys.offers.list({ sort: "featured" }),
@@ -209,7 +251,8 @@ export default function HomeTab() {
   });
 
   const toggleSave = async (offer: Offer) => {
-    await apiToggleSaveOffer(offer.id);
+    const result = await apiToggleSaveOffer(offer.id);
+    if (!result.saved && user) await cancelSavedOfferReminder(user.id, offer.id);
     await queryClient.invalidateQueries({ queryKey: queryKeys.offers.all() });
   };
 
@@ -317,6 +360,15 @@ export default function HomeTab() {
         Boolean(outlet.image_url || outlet.logo_url),
     )
     .slice(0, 5);
+  const campusOfferByOutletId = useMemo(() => {
+    const offersByOutlet = new Map<string, Offer>();
+    for (const offer of allOffers) {
+      if (offer.outlet_id && !offersByOutlet.has(offer.outlet_id)) {
+        offersByOutlet.set(offer.outlet_id, offer);
+      }
+    }
+    return offersByOutlet;
+  }, [allOffers]);
   const spotlightOfferIds = new Set(spotlightOffers.map((offer) => offer.id));
   const perplexityOffer = allOffers.find((offer) => normalizeBrand(offer.brand) === "perplexity");
   const moreBrandOffers = [
@@ -336,14 +388,27 @@ export default function HomeTab() {
   const spotlightWidth = getSpotlightWidth(viewportWidth);
   const spotlightStride = spotlightWidth + space.md;
   const spotlightSideInset = Math.max(space.md, (viewportWidth - spotlightStride) / 2);
-  const outletWidth = Math.max(290, viewportWidth - 72);
+  const outletWidth = Math.max(264, viewportWidth - 88);
   const outletStride = outletWidth + space.md;
+  const outletSideInset = Math.max(space.md, (viewportWidth - outletStride) / 2);
   const refreshing =
     featured.isRefetching ||
     trending.isRefetching ||
     outlets.isRefetching ||
     locatedOutlets.isRefetching ||
     categoriesQuery.isRefetching;
+
+  useEffect(() => {
+    if (campusPicks.length < 2) return;
+    const timer = setInterval(() => {
+      setOutletIndex((current) => {
+        const next = (current + 1) % campusPicks.length;
+        outletRef.current?.scrollTo({ x: next * outletStride, animated: true });
+        return next;
+      });
+    }, 5_500);
+    return () => clearInterval(timer);
+  }, [campusPicks.length, outletStride]);
 
   return (
     <Screen edges={["top"]}>
@@ -510,7 +575,7 @@ export default function HomeTab() {
               accessibilityLabel={action.label}
             >
               <View style={styles.actionIcon}>
-                <Ionicons name={action.icon} size={19} color="#C7D2FE" />
+                <Image source={action.asset} style={styles.actionIconImage} resizeMode="contain" />
               </View>
               <AppText variant="small">{action.label}</AppText>
             </Pressable>
@@ -555,23 +620,86 @@ export default function HomeTab() {
                 </AppText>
               </Pressable>
             </View>
-            <ScrollView
+            <Animated.ScrollView
+              ref={outletRef}
               horizontal
               showsHorizontalScrollIndicator={false}
               snapToInterval={outletStride}
               decelerationRate="fast"
               disableIntervalMomentum
-              contentContainerStyle={styles.outletRail}
+              contentContainerStyle={[styles.outletRail, { paddingHorizontal: outletSideInset }]}
+              scrollEventThrottle={16}
+              onScroll={Animated.event([{ nativeEvent: { contentOffset: { x: outletScrollX } } }], {
+                useNativeDriver: true,
+              })}
+              onMomentumScrollEnd={(event) =>
+                setOutletIndex(
+                  Math.max(
+                    0,
+                    Math.min(
+                      campusPicks.length - 1,
+                      Math.round(event.nativeEvent.contentOffset.x / outletStride),
+                    ),
+                  ),
+                )
+              }
             >
-              {campusPicks.map((outlet) => (
-                <OutletTile
-                  key={outlet.id}
-                  outlet={outlet}
-                  width={outletWidth}
-                  onPress={() => router.push(`/outlet/${outlet.id}`)}
-                />
-              ))}
-            </ScrollView>
+              {campusPicks.map((outlet, index) => {
+                const inputRange = [
+                  (index - 1) * outletStride,
+                  index * outletStride,
+                  (index + 1) * outletStride,
+                ];
+                const scale = outletScrollX.interpolate({
+                  inputRange,
+                  outputRange: [0.9, 1, 0.9],
+                  extrapolate: "clamp",
+                });
+                const opacity = outletScrollX.interpolate({
+                  inputRange,
+                  outputRange: [0.58, 1, 0.58],
+                  extrapolate: "clamp",
+                });
+                const translateY = outletScrollX.interpolate({
+                  inputRange,
+                  outputRange: [12, 0, 12],
+                  extrapolate: "clamp",
+                });
+
+                return (
+                  <Animated.View
+                    key={outlet.id}
+                    style={[
+                      styles.outletCarouselItem,
+                      { width: outletStride, opacity, transform: [{ translateY }, { scale }] },
+                    ]}
+                  >
+                    <OutletTile
+                      outlet={outlet}
+                      offer={campusOfferByOutletId.get(outlet.id)}
+                      width={outletWidth}
+                      onPress={() => router.push(`/outlet/${outlet.id}`)}
+                    />
+                  </Animated.View>
+                );
+              })}
+            </Animated.ScrollView>
+            {campusPicks.length > 1 ? (
+              <View
+                style={styles.outletPagination}
+                accessibilityLabel={`Popular outlet ${outletIndex + 1} of ${campusPicks.length}`}
+              >
+                {campusPicks.map((outlet, index) => (
+                  <View
+                    key={outlet.id}
+                    style={[
+                      styles.paginationDot,
+                      index === outletIndex && styles.paginationDotActive,
+                    ]}
+                  />
+                ))}
+              </View>
+            ) : null}
           </View>
         ) : null}
 
@@ -791,20 +919,19 @@ const styles = StyleSheet.create({
   actionBar: {
     marginHorizontal: space.lg,
     marginTop: space.lg,
-    paddingVertical: space.md,
+    paddingVertical: 12,
     flexDirection: "row",
     borderRadius: radius.lg,
     backgroundColor: color.surfaceMuted,
   },
-  action: { flex: 1, alignItems: "center", gap: space.sm },
+  action: { flex: 1, alignItems: "center", gap: 5 },
   actionIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 50,
+    height: 48,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: color.primarySoft,
   },
+  actionIconImage: { width: 48, height: 48 },
   pointsRow: {
     marginHorizontal: space.lg,
     marginTop: space.lg,
@@ -817,43 +944,76 @@ const styles = StyleSheet.create({
   pointsCopy: { flex: 1 },
   outletsSection: { marginTop: space.xxl },
   outletsHeader: { paddingHorizontal: space.lg },
-  outletRail: { paddingHorizontal: space.lg, gap: space.md },
+  outletRail: { paddingVertical: space.sm },
+  outletCarouselItem: { alignItems: "center", justifyContent: "center" },
   outletTile: {
-    height: 236,
+    height: 390,
     overflow: "hidden",
-    borderRadius: radius.lg,
+    borderRadius: radius.xl,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: color.borderStrong,
     backgroundColor: color.surface,
   },
-  outletImage: { position: "absolute", width: "100%", height: "100%" },
+  outletVisual: { height: 262, overflow: "hidden", backgroundColor: color.surfaceElevated },
+  outletImage: { width: "100%", height: "100%" },
   outletShade: {
     position: "absolute",
     top: 0,
     right: 0,
     bottom: 0,
     left: 0,
-    backgroundColor: "rgba(0,0,0,0.26)",
+    backgroundColor: "rgba(0,0,0,0.08)",
   },
   outletRating: {
     position: "absolute",
     top: space.sm,
-    right: space.sm,
+    left: space.sm,
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
     paddingHorizontal: space.sm,
     paddingVertical: 5,
     borderRadius: radius.pill,
-    backgroundColor: "rgba(5,5,5,0.74)",
+    backgroundColor: "rgba(5,5,8,0.78)",
   },
-  outletCopy: { position: "absolute", left: space.md, right: space.md, bottom: space.md, gap: 2 },
-  outletName: { fontSize: 18, lineHeight: 23, fontWeight: "800" },
-  outletCampus: {
-    fontSize: 14,
-    lineHeight: 19,
-    fontWeight: "700",
-    color: "rgba(255,255,255,0.86)",
+  outletRatingText: { color: "#FFFFFF", fontWeight: "800" },
+  outletOpenButton: {
+    position: "absolute",
+    top: space.sm,
+    right: space.sm,
+    width: 44,
+    height: 44,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(5,5,8,0.78)",
   },
-  outletMeta: { fontSize: 12, lineHeight: 17, fontWeight: "600", color: "rgba(255,255,255,0.7)" },
+  outletOfferStrip: {
+    minHeight: 46,
+    paddingHorizontal: space.md,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.sm,
+  },
+  outletOfferText: { flex: 1, fontSize: 14, lineHeight: 19, color: "#FFFFFF" },
+  outletOfferLead: { fontSize: 14, lineHeight: 19, color: "#FFFFFF", fontWeight: "900" },
+  outletCopy: { flex: 1, paddingHorizontal: space.md, justifyContent: "center", gap: space.sm },
+  outletName: { fontSize: 22, lineHeight: 27, fontWeight: "800", letterSpacing: -0.3 },
+  outletLocationRow: { minWidth: 0, flexDirection: "row", alignItems: "center", gap: 5 },
+  outletMeta: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "600",
+    color: color.textTertiary,
+  },
+  outletPagination: {
+    height: 30,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
   recommendations: { marginTop: space.xl, paddingHorizontal: space.lg },
   sectionHeader: {
     flexDirection: "row",

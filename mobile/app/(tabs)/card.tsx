@@ -44,9 +44,14 @@ export default function CardTab() {
   return (
     <Screen edges={["top"]}>
       <View style={styles.content}>
-        <AppText variant="h1">Student ID</AppText>
+        <AppText variant="caption" color="#818CF8" style={styles.eyebrow}>
+          YOUR STUDENT PASS
+        </AppText>
+        <AppText variant="h1" style={styles.title}>
+          Show it. Save more.
+        </AppText>
         <AppText variant="body" color={color.textSecondary} style={styles.subtitle}>
-          Your verified membership, ready at every partner outlet.
+          Store it on your phone. Show it at partner outlets for instant discounts.
         </AppText>
 
         <View style={styles.cardWrap}>
@@ -57,8 +62,14 @@ export default function CardTab() {
           )}
         </View>
         <View style={styles.reassurance}>
-          <Ionicons name="lock-closed-outline" size={15} color={color.textTertiary} />
+          <Ionicons name="move-outline" size={15} color="#5EEAD4" />
           <AppText variant="caption" color={color.textTertiary}>
+            Swipe across the card to tilt it and move the light.
+          </AppText>
+        </View>
+        <View style={styles.privacyNote}>
+          <Ionicons name="lock-closed-outline" size={14} color={color.textTertiary} />
+          <AppText variant="caption" color={color.textTertiary} style={styles.privacyText}>
             Your QR shares only the details needed to verify membership.
           </AppText>
         </View>
@@ -87,9 +98,27 @@ const styles = StyleSheet.create({
   lockedTitle: { textAlign: "center" },
   lockedBody: { textAlign: "center" },
   content: { flex: 1, padding: space.lg, gap: space.xs },
-  subtitle: { marginBottom: space.md },
-  cardWrap: { marginTop: space.md },
-  reassurance: { marginTop: space.lg, flexDirection: "row", alignItems: "center", gap: space.sm },
+  eyebrow: { letterSpacing: 2.4, fontWeight: "800" },
+  title: { marginTop: 2, letterSpacing: -0.55 },
+  subtitle: { marginTop: space.xs, marginBottom: space.sm },
+  cardWrap: { marginTop: space.xs },
+  reassurance: {
+    marginTop: space.sm,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: space.sm,
+  },
+  privacyNote: {
+    marginTop: space.lg,
+    paddingTop: space.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: color.border,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: space.sm,
+  },
+  privacyText: { flex: 1 },
   skeleton: {
     aspectRatio: 1.586,
     borderRadius: radius.lg,

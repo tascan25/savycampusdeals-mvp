@@ -7133,7 +7133,9 @@ def offer_category_query(category: str) -> dict:
     }
 
 
-def serialize_offer(o: dict, saved_ids: set = None) -> dict:
+def serialize_offer(
+    o: dict, saved_ids: set = None, active_coupon: dict = None
+) -> dict:
     saved_ids = saved_ids or set()
     outlet_id = o.get("outlet_id")
     return {
@@ -7158,8 +7160,38 @@ def serialize_offer(o: dict, saved_ids: set = None) -> dict:
         "offer_type": "partner_outlet" if outlet_id else "listed_brand",
         "disclaimer": "" if outlet_id else BRAND_OFFER_DISCLAIMER,
         "redemption_policy": o.get("redemption_policy", ""),
+        "active_coupon": (
+            {
+                "id": str(active_coupon["_id"]),
+                "status": "active",
+                "expires_at": (
+                    active_coupon["expires_at"].isoformat()
+                    if active_coupon.get("expires_at")
+                    else None
+                ),
+            }
+            if active_coupon
+            else None
+        ),
         "created_at": o.get("created_at").isoformat() if o.get("created_at") else None,
     }
+
+
+async def get_live_active_coupon(user_id: ObjectId, offer_id: ObjectId) -> dict | None:
+    """Return an active coupon, expiring stale records before exposing them."""
+    coupon = await db.coupons.find_one(
+        {"user_id": user_id, "offer_id": offer_id, "status": "active"}
+    )
+    if not coupon:
+        return None
+    expires_at = coupon.get("expires_at")
+    if expires_at and _aware(expires_at) <= datetime.now(timezone.utc):
+        await db.coupons.update_one(
+            {"_id": coupon["_id"], "status": "active"},
+            {"$set": {"status": "expired"}},
+        )
+        return None
+    return coupon
 
 
 def serialize_outlet(o: dict, offer_count: int = 0) -> dict:
@@ -7253,6 +7285,7 @@ async def get_offer(offer_id: str, request: Request):
     if not o:
         raise HTTPException(404, "Offer not found")
     saved_ids: set = set()
+    active_coupon = None
     try:
         user = await get_current_user(request)
         saved = await db.saved_offers.find_one(
@@ -7260,9 +7293,11 @@ async def get_offer(offer_id: str, request: Request):
         )
         if saved:
             saved_ids.add(offer_id)
+        if o.get("outlet_id"):
+            active_coupon = await get_live_active_coupon(user["_id"], o["_id"])
     except Exception:
         pass
-    result = serialize_offer(o, saved_ids)
+    result = serialize_offer(o, saved_ids, active_coupon)
     if o.get("outlet_id"):
         outlet = await db.outlets.find_one(
             {"_id": o["outlet_id"]}, {"hours": 1}
@@ -7427,7 +7462,9 @@ async def claim_listed_brand_offer(offer: dict, user: dict, now: datetime) -> di
     return serialize_brand_offer_claim(claim, offer)
 
 
-def serialize_coupon(c: dict, offer: dict = None) -> dict:
+def serialize_coupon(
+    c: dict, offer: dict = None, *, already_active: bool = False
+) -> dict:
     status = c["status"]
     if (
         status == "active"
@@ -7449,6 +7486,7 @@ def serialize_coupon(c: dict, offer: dict = None) -> dict:
         "created_at": c["created_at"].isoformat() if c.get("created_at") else None,
         "expires_at": c["expires_at"].isoformat() if c.get("expires_at") else None,
         "redeemed_at": c["redeemed_at"].isoformat() if c.get("redeemed_at") else None,
+        "already_active": already_active,
     }
 
 
@@ -7475,17 +7513,9 @@ async def claim_offer(offer_id: str, user=Depends(get_verified_user)):
 
     # Prevent duplicate active coupons for the same offer. An expiry is also
     # applied here so an unscanned, stale coupon cannot block a fresh claim.
-    existing = await db.coupons.find_one(
-        {"user_id": user["_id"], "offer_id": oid, "status": "active"}
-    )
+    existing = await get_live_active_coupon(user["_id"], oid)
     if existing:
-        if existing.get("expires_at") and _aware(existing["expires_at"]) < now:
-            await db.coupons.update_one(
-                {"_id": existing["_id"], "status": "active"},
-                {"$set": {"status": "expired"}},
-            )
-        else:
-            return serialize_coupon(existing, offer)
+        return serialize_coupon(existing, offer, already_active=True)
 
     # Apply the policy configured on this specific outlet offer. The QR expiry
     # is calculated from the same policy below.
@@ -7558,7 +7588,15 @@ async def claim_offer(offer_id: str, user=Depends(get_verified_user)):
         "expires_at": expires,
         "redeemed_at": None,
     }
-    res = await db.coupons.insert_one(doc)
+    try:
+        res = await db.coupons.insert_one(doc)
+    except DuplicateKeyError:
+        # A concurrent request won the unique active-coupon race. Return that
+        # coupon as an idempotent success instead of creating a second claim.
+        existing = await get_live_active_coupon(user["_id"], oid)
+        if existing:
+            return serialize_coupon(existing, offer, already_active=True)
+        raise
     doc["_id"] = res.inserted_id
     await db.offers.update_one({"_id": oid}, {"$inc": {"claims_count": 1}})
 
@@ -7966,6 +8004,20 @@ async def get_outlet(outlet_id: str, request: Request):
         redeemed_coupons = await db.coupons.find(
             {"user_id": user["_id"], "outlet_id": oid, "status": "redeemed"}
         ).sort("redeemed_at", -1).to_list(500)
+        active_coupons = await db.coupons.find(
+            {"user_id": user["_id"], "outlet_id": oid, "status": "active"}
+        ).to_list(500)
+        now = datetime.now(timezone.utc)
+        active_by_offer = {}
+        for coupon in active_coupons:
+            expires_at = coupon.get("expires_at")
+            if expires_at and _aware(expires_at) <= now:
+                await db.coupons.update_one(
+                    {"_id": coupon["_id"], "status": "active"},
+                    {"$set": {"status": "expired"}},
+                )
+                continue
+            active_by_offer[str(coupon["offer_id"])] = coupon
         day_start, day_end = india_day_bounds()
         month_start, month_end = india_month_bounds()
         last_redeemed = redeemed_coupons[0] if redeemed_coupons else None
@@ -8008,6 +8060,7 @@ async def get_outlet(outlet_id: str, request: Request):
             offer_claim_states[str(offer["_id"])] = {
                 "claim_blocked": blocked,
                 "claim_message": message if blocked else "",
+                "active_coupon": active_by_offer.get(str(offer["_id"])),
             }
 
         blocked_messages = [
@@ -8023,11 +8076,16 @@ async def get_outlet(outlet_id: str, request: Request):
 
     serialized_offers = []
     for offer in offers:
-        serialized = serialize_offer(offer, saved_ids)
+        state = offer_claim_states.get(
+            str(offer["_id"]),
+            {"claim_blocked": False, "claim_message": "", "active_coupon": None},
+        )
+        serialized = serialize_offer(offer, saved_ids, state.get("active_coupon"))
         serialized.update(
-            offer_claim_states.get(
-                str(offer["_id"]), {"claim_blocked": False, "claim_message": ""}
-            )
+            {
+                "claim_blocked": state["claim_blocked"],
+                "claim_message": state["claim_message"],
+            }
         )
         serialized_offers.append(serialized)
 
@@ -9064,6 +9122,48 @@ async def on_startup():
         await db.users.create_index("email", unique=True)
         await db.saved_offers.create_index(
             [("user_id", 1), ("offer_id", 1)], unique=True
+        )
+        # Older deployments could create duplicate active coupons under a
+        # simultaneous double-tap. Keep the newest and retire the rest before
+        # enforcing the invariant at database level.
+        duplicate_groups = await db.coupons.aggregate(
+            [
+                {"$match": {"status": "active"}},
+                {
+                    "$group": {
+                        "_id": {"user_id": "$user_id", "offer_id": "$offer_id"},
+                        "count": {"$sum": 1},
+                    }
+                },
+                {"$match": {"count": {"$gt": 1}}},
+            ]
+        ).to_list(None)
+        duplicate_cleanup_at = datetime.now(timezone.utc)
+        for group in duplicate_groups:
+            duplicates = await db.coupons.find(
+                {
+                    "user_id": group["_id"]["user_id"],
+                    "offer_id": group["_id"]["offer_id"],
+                    "status": "active",
+                }
+            ).sort("created_at", -1).to_list(None)
+            duplicate_ids = [coupon["_id"] for coupon in duplicates[1:]]
+            if duplicate_ids:
+                await db.coupons.update_many(
+                    {"_id": {"$in": duplicate_ids}, "status": "active"},
+                    {
+                        "$set": {
+                            "status": "expired",
+                            "expired_at": duplicate_cleanup_at,
+                            "expired_reason": "duplicate_active_cleanup",
+                        }
+                    },
+                )
+        await db.coupons.create_index(
+            [("user_id", 1), ("offer_id", 1)],
+            unique=True,
+            partialFilterExpression={"status": "active"},
+            name="one_active_coupon_per_user_offer",
         )
         await db.coupons.create_index([("user_id", 1), ("offer_id", 1), ("status", 1)])
         await db.coupons.create_index(

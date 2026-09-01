@@ -11,54 +11,50 @@ import {
   useState,
   type PropsWithChildren,
 } from "react";
-import { Linking, Platform } from "react-native";
+import { AppState, Linking, Platform } from "react-native";
 
+import { apiListCoupons } from "@/api/coupons";
 import { apiMarkPushOpened, apiRegisterPushDevice } from "@/api/push";
+import { apiGetSavvyPointsOverview } from "@/api/rewards";
+import { NotificationPermissionSheet } from "@/components/NotificationPermissionSheet";
 import { useAuth } from "@/providers/AuthProvider";
 import { getPushInstallationId } from "@/services/installation";
+import {
+  cancelAllManagedLocalNotifications,
+  ensureNotificationChannels,
+  reconcileLocalNotifications,
+} from "@/services/localNotifications";
+import {
+  recordNotificationPermissionPromptShown,
+  shouldShowNotificationPermissionPrompt,
+} from "@/services/notificationPermissionPrompt";
 import { resolveCtaRoute } from "@/utils/announcementRoute";
 
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
+  handleNotification: async (notification) => ({
     shouldShowBanner: true,
     shouldShowList: true,
-    shouldPlaySound: false,
+    shouldPlaySound: notification.request.content.data?.play_sound === true,
     shouldSetBadge: false,
   }),
 });
 
-export type PushPermissionState = "loading" | "enabled" | "disabled" | "unavailable";
+export type PushPermissionState =
+  | "loading"
+  | "enabled"
+  | "undetermined"
+  | "denied"
+  | "unavailable";
 
 type PushNotificationContextValue = {
   permission: PushPermissionState;
   enable: () => Promise<boolean>;
   refresh: () => Promise<void>;
   openSystemSettings: () => Promise<void>;
+  reconcileReminders: () => Promise<number>;
 };
 
 const PushNotificationContext = createContext<PushNotificationContextValue | null>(null);
-
-async function ensureAndroidChannels(): Promise<void> {
-  if (Platform.OS !== "android") return;
-  await Promise.all([
-    Notifications.setNotificationChannelAsync("account", {
-      name: "Important account updates",
-      description: "Verification, account and security updates",
-      importance: Notifications.AndroidImportance.HIGH,
-      vibrationPattern: [0, 220, 120, 220],
-    }),
-    Notifications.setNotificationChannelAsync("reminders", {
-      name: "Reminders",
-      description: "Coupon and membership reminders",
-      importance: Notifications.AndroidImportance.DEFAULT,
-    }),
-    Notifications.setNotificationChannelAsync("deals", {
-      name: "Deals and announcements",
-      description: "New campus deals and Savvy announcements",
-      importance: Notifications.AndroidImportance.DEFAULT,
-    }),
-  ]);
-}
 
 async function registerCurrentToken(permission: "granted" | "provisional"): Promise<void> {
   if (Platform.OS !== "android" && Platform.OS !== "ios") return;
@@ -86,26 +82,49 @@ function grantedState(
   return null;
 }
 
+function permissionState(
+  settings: Notifications.NotificationPermissionsStatus,
+): PushPermissionState {
+  if (grantedState(settings)) return "enabled";
+  return settings.canAskAgain ? "undetermined" : "denied";
+}
+
 export function PushNotificationProvider({ children }: PropsWithChildren) {
   const { user } = useAuth();
   const router = useRouter();
   const [permission, setPermission] = useState<PushPermissionState>("loading");
+  const [permissionPromptVisible, setPermissionPromptVisible] = useState(false);
+  const [permissionPromptWorking, setPermissionPromptWorking] = useState(false);
   const handledResponses = useRef(new Set<string>());
 
-  const syncPermissionAndToken = useCallback(async () => {
+  const reconcileReminders = useCallback(async (): Promise<number> => {
+    if (!user || user.role !== "student") return 0;
+    const settings = await Notifications.getPermissionsAsync();
+    if (!grantedState(settings)) return 0;
+    const [coupons, rewards] = await Promise.all([apiListCoupons(), apiGetSavvyPointsOverview()]);
+    return reconcileLocalNotifications({
+      user,
+      coupons,
+      levelRewards: rewards.level_rewards,
+    });
+  }, [user]);
+
+  const syncPermissionAndToken = useCallback(async (): Promise<PushPermissionState> => {
     if (Platform.OS !== "android" && Platform.OS !== "ios") {
       setPermission("unavailable");
-      return;
+      return "unavailable";
     }
-    await ensureAndroidChannels();
+    await ensureNotificationChannels();
     const settings = await Notifications.getPermissionsAsync();
     const granted = grantedState(settings);
-    setPermission(granted ? "enabled" : "disabled");
+    const nextPermission = permissionState(settings);
+    setPermission(nextPermission);
     if (granted && user) {
       // Token registration is deliberately best-effort. A Firebase outage must
       // never block authentication or make the app unusable.
-      await registerCurrentToken(granted).catch(() => undefined);
+      void registerCurrentToken(granted).catch(() => undefined);
     }
+    return nextPermission;
   }, [user]);
 
   const handleResponse = useCallback(
@@ -134,11 +153,30 @@ export function PushNotificationProvider({ children }: PropsWithChildren) {
   );
 
   useEffect(() => {
+    if (user === null) {
+      void cancelAllManagedLocalNotifications();
+      return;
+    }
     if (!user) return;
-    // Permission/token hydration resolves asynchronously from the native OS;
-    // the hooks rule cannot distinguish it from a synchronous state setter.
+    let active = true;
+    let promptTimer: ReturnType<typeof setTimeout> | undefined;
+    // Permission hydration is an asynchronous native-system synchronization;
+    // state updates occur after its promise resolves, never during render.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    void syncPermissionAndToken();
+    void syncPermissionAndToken().then(async (nextPermission) => {
+      if (!active) return;
+      if (nextPermission === "enabled") {
+        void reconcileReminders().catch(() => undefined);
+        return;
+      }
+      const due = await shouldShowNotificationPermissionPrompt(false);
+      if (!active || !due) return;
+      promptTimer = setTimeout(() => {
+        if (!active) return;
+        void recordNotificationPermissionPromptShown();
+        setPermissionPromptVisible(true);
+      }, 1200);
+    });
     const tokenSubscription = Notifications.addPushTokenListener(() => {
       void syncPermissionAndToken();
     });
@@ -148,36 +186,73 @@ export function PushNotificationProvider({ children }: PropsWithChildren) {
     void Notifications.getLastNotificationResponseAsync()
       .then(handleResponse)
       .catch(() => undefined);
+    const appStateSubscription = AppState.addEventListener("change", (state) => {
+      if (state !== "active") return;
+      void syncPermissionAndToken().then((nextPermission) => {
+        if (nextPermission === "enabled") void reconcileReminders().catch(() => undefined);
+      });
+    });
     return () => {
+      active = false;
+      if (promptTimer) clearTimeout(promptTimer);
       tokenSubscription.remove();
       responseSubscription.remove();
+      appStateSubscription.remove();
     };
-  }, [handleResponse, syncPermissionAndToken, user]);
+  }, [handleResponse, reconcileReminders, syncPermissionAndToken, user]);
 
   const enable = useCallback(async () => {
     if (Platform.OS !== "android" && Platform.OS !== "ios") return false;
-    await ensureAndroidChannels();
+    await ensureNotificationChannels();
     const settings = await Notifications.requestPermissionsAsync();
     const granted = grantedState(settings);
-    setPermission(granted ? "enabled" : "disabled");
-    if (granted && user) await registerCurrentToken(granted).catch(() => undefined);
+    setPermission(permissionState(settings));
+    if (granted && user) {
+      void registerCurrentToken(granted).catch(() => undefined);
+      void reconcileReminders().catch(() => undefined);
+    }
     return Boolean(granted);
-  }, [user]);
+  }, [reconcileReminders, user]);
+
+  const dismissPermissionPrompt = useCallback(() => setPermissionPromptVisible(false), []);
+
+  const acceptPermissionPrompt = useCallback(async () => {
+    setPermissionPromptWorking(true);
+    if (permission === "denied") {
+      await Linking.openSettings().catch(() => undefined);
+    } else {
+      await enable();
+    }
+    setPermissionPromptWorking(false);
+    setPermissionPromptVisible(false);
+  }, [enable, permission]);
 
   const value = useMemo<PushNotificationContextValue>(
     () => ({
       permission,
       enable,
-      refresh: syncPermissionAndToken,
+      refresh: async () => {
+        await syncPermissionAndToken();
+      },
+      reconcileReminders,
       openSystemSettings: async () => {
         await Linking.openSettings();
       },
     }),
-    [enable, permission, syncPermissionAndToken],
+    [enable, permission, reconcileReminders, syncPermissionAndToken],
   );
 
   return (
-    <PushNotificationContext.Provider value={value}>{children}</PushNotificationContext.Provider>
+    <PushNotificationContext.Provider value={value}>
+      {children}
+      <NotificationPermissionSheet
+        visible={Boolean(user) && permissionPromptVisible}
+        requiresSettings={permission === "denied"}
+        working={permissionPromptWorking}
+        onAllow={() => void acceptPermissionPrompt()}
+        onDismiss={dismissPermissionPrompt}
+      />
+    </PushNotificationContext.Provider>
   );
 }
 

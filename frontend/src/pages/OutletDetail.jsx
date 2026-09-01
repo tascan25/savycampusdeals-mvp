@@ -23,8 +23,8 @@ export default function OutletDetail() {
     if (!user) { nav("/login"); return; }
     setClaimingId(offerId);
     try {
-      await api.post(`/offers/${offerId}/claim`);
-      toast.success("Coupon ready! Head to My Coupons.");
+      const { data } = await api.post(`/offers/${offerId}/claim`);
+      toast.success(data.already_active ? "Coupon is already active." : "Coupon ready! Head to My Coupons.");
       nav("/coupons");
     } catch (e) {
       toast.error(formatApiError(e.response?.data?.detail));
@@ -108,14 +108,28 @@ export default function OutletDetail() {
                   </div>
                   <div className="flex md:flex-col items-center md:items-end gap-3 shrink-0">
                     <div className="font-display text-2xl font-extrabold text-white">{o.discount}</div>
-                    <button
-                      data-testid={`outlet-claim-btn-${o.id}`}
-                      onClick={() => claim(o.id)}
-                      disabled={claimingId === o.id || o.claim_blocked || (user && !canClaim)}
-                      className="rounded-full bg-white text-black text-sm font-semibold px-4 py-2 hover:scale-[1.03] active:scale-[0.97] transition-transform disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
-                    >
-                      {claimingId === o.id ? <Loader2 size={14} className="animate-spin" /> : <><Ticket size={14} /> Claim</>}
-                    </button>
+                    {o.active_coupon ? (
+                      <div className="flex md:flex-col items-center md:items-end gap-2">
+                        <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-300" data-testid={`outlet-active-badge-${o.id}`}>
+                          <ShieldCheck size={13} /> Coupon active
+                        </span>
+                        <button
+                          onClick={() => nav("/coupons")}
+                          className="text-xs font-semibold text-indigo-300 hover:text-indigo-200"
+                        >
+                          View in My Coupons →
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        data-testid={`outlet-claim-btn-${o.id}`}
+                        onClick={() => claim(o.id)}
+                        disabled={claimingId === o.id || o.claim_blocked || (user && !canClaim)}
+                        className="rounded-full bg-white text-black text-sm font-semibold px-4 py-2 hover:scale-[1.03] active:scale-[0.97] transition-transform disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+                      >
+                        {claimingId === o.id ? <Loader2 size={14} className="animate-spin" /> : <><Ticket size={14} /> Claim</>}
+                      </button>
+                    )}
                   </div>
                 </motion.div>
               ))}

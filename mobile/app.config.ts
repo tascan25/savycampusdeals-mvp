@@ -47,11 +47,23 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   plugins: [
     ...(config.plugins ?? []),
     "expo-asset",
+    [
+      "expo-build-properties",
+      {
+        ios: {
+          // Xcode 26.6 cannot link this project's New Architecture pods
+          // against React Native's precompiled core: the prebuilt framework
+          // omits debug symbols consumed by Screens/Reanimated/Gesture Handler.
+          buildReactNativeFromSource: true,
+        },
+      },
+    ],
+    "@react-native-community/datetimepicker",
     ...(APP_ENV !== "production" ? ["./plugins/withDevCleartextTraffic"] : []),
     [
       "./plugins/withAndroidNotifications",
       {
-        icon: "./assets/android-icon-monochrome.png",
+        icon: "./assets/notification-icon-savvy.png",
         color: "#4F46E5",
         defaultChannel: "deals",
       },
@@ -83,6 +95,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         photosPermission: "Allow $(PRODUCT_NAME) to access your photos for student verification.",
       },
     ],
+    // Local iOS notifications do not require APNs. Keep this last so it
+    // removes the remote-push entitlement added by Expo's automatic plugin.
+    "./plugins/withIosLocalNotificationsOnly",
   ],
   ios: {
     ...config.ios,
@@ -105,7 +120,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     },
   },
   android: {
-    versionCode:1,
+    versionCode: 1,
     ...config.android,
     icon: "./assets/icon.png",
     package: ANDROID_PACKAGE,

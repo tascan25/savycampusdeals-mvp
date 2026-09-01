@@ -5,10 +5,18 @@ import { useEffect, useState } from "react";
 import { AppText, Button, Screen } from "@/design-system/components";
 import { color, radius, space } from "@/design-system/tokens";
 import { usePushNotifications } from "@/providers/PushNotificationProvider";
+import {
+  cancelAllManagedLocalNotifications,
+  getManagedLocalNotificationCount,
+  presentDevelopmentNotification,
+  scheduleDevelopmentNotification,
+} from "@/services/localNotifications";
 
 export default function NotificationSettingsScreen() {
-  const { permission, enable, openSystemSettings, refresh } = usePushNotifications();
+  const { permission, enable, openSystemSettings, refresh, reconcileReminders } =
+    usePushNotifications();
   const [working, setWorking] = useState(false);
+  const [testStatus, setTestStatus] = useState("");
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
@@ -24,6 +32,23 @@ export default function NotificationSettingsScreen() {
   };
 
   const enabled = permission === "enabled";
+  const denied = permission === "denied";
+
+  const runDevelopmentAction = async (
+    action: () => Promise<string | void>,
+    success: string,
+  ) => {
+    setWorking(true);
+    setTestStatus("");
+    try {
+      const result = await action();
+      setTestStatus(result ?? success);
+    } catch {
+      setTestStatus("The notification action failed. Check permission and try again.");
+    } finally {
+      setWorking(false);
+    }
+  };
   return (
     <Screen edges={["bottom"]}>
       <ScrollView contentContainerStyle={styles.content}>
@@ -38,7 +63,7 @@ export default function NotificationSettingsScreen() {
           <AppText variant="h1">Stay in the loop</AppText>
           <AppText variant="body" color={color.textSecondary}>
             Get verification updates, coupon reminders and occasional campus deal announcements. You
-            remain in control through Android&apos;s notification settings.
+            remain in control through your device&apos;s notification settings.
           </AppText>
         </View>
 
@@ -48,10 +73,12 @@ export default function NotificationSettingsScreen() {
               <AppText variant="bodyMedium">Notifications on this phone</AppText>
               <AppText variant="caption" color={color.textTertiary}>
                 {enabled
-                  ? "Enabled. You can control each category in Android settings."
+                  ? "Enabled. You can control notification behavior in system settings."
                   : permission === "loading"
                     ? "Checking system permission…"
-                    : "Disabled. In-app announcements will still work normally."}
+                    : denied
+                      ? "Blocked in system settings. In-app announcements still work normally."
+                      : "Not enabled yet. In-app announcements still work normally."}
               </AppText>
             </View>
             <View style={[styles.badge, enabled && styles.badgeEnabled]}>
@@ -62,12 +89,8 @@ export default function NotificationSettingsScreen() {
           </View>
         </View>
 
-        {enabled ? (
-          <Button
-            label="Open system notification settings"
-            variant="secondary"
-            onPress={openSystemSettings}
-          />
+        {enabled || denied ? (
+          <Button label="Open system notification settings" variant="secondary" onPress={openSystemSettings} />
         ) : (
           <>
             <Button
@@ -75,9 +98,92 @@ export default function NotificationSettingsScreen() {
               onPress={activate}
               loading={working || permission === "loading"}
             />
-            <Button label="Open system settings" variant="secondary" onPress={openSystemSettings} />
           </>
         )}
+
+        {enabled ? (
+          <Button
+            label="Refresh scheduled reminders"
+            variant="secondary"
+            onPress={() =>
+              void runDevelopmentAction(
+                async () => {
+                  const count = await reconcileReminders();
+                  return `${count} reminder${count === 1 ? "" : "s"} scheduled.`;
+                },
+                "Reminders refreshed.",
+              )
+            }
+            disabled={working}
+          />
+        ) : null}
+
+        {__DEV__ ? (
+          <View style={styles.developmentCard}>
+            <View style={styles.developmentHeading}>
+              <Ionicons name="flask-outline" size={19} color="#C7D2FE" />
+              <View style={styles.copy}>
+                <AppText variant="bodyMedium">Local notification testing</AppText>
+                <AppText variant="caption" color={color.textTertiary}>
+                  Development build only. No backend or push token is used.
+                </AppText>
+              </View>
+            </View>
+            <Button
+              label="Show test notification now"
+              onPress={() =>
+                void runDevelopmentAction(
+                  presentDevelopmentNotification,
+                  "Test notification sent.",
+                )
+              }
+              disabled={!enabled || working}
+            />
+            <Button
+              label="Schedule test in 10 seconds"
+              variant="secondary"
+              onPress={() =>
+                void runDevelopmentAction(
+                  async () => {
+                    await scheduleDevelopmentNotification(10);
+                  },
+                  "Test scheduled. Background the app now.",
+                )
+              }
+              disabled={!enabled || working}
+            />
+            <Button
+              label="Count managed reminders"
+              variant="secondary"
+              onPress={() =>
+                void runDevelopmentAction(
+                  async () => {
+                    const count = await getManagedLocalNotificationCount();
+                    return `${count} managed reminder${count === 1 ? "" : "s"} scheduled.`;
+                  },
+                  "Reminder count refreshed.",
+                )
+              }
+              disabled={working}
+            />
+            <Button
+              label="Cancel managed reminders"
+              variant="secondary"
+              onPress={() =>
+                void runDevelopmentAction(
+                  cancelAllManagedLocalNotifications,
+                  "Managed reminders cancelled.",
+                )
+              }
+              disabled={working}
+            />
+            {testStatus ? (
+              <AppText variant="caption" color={color.textSecondary} style={styles.testStatus}>
+                {testStatus}
+              </AppText>
+            ) : null}
+          </View>
+        ) : null}
 
         <AppText variant="caption" color={color.textTertiary} style={styles.note}>
           Savvy never includes verification documents, coupon codes or other sensitive account data
@@ -111,4 +217,14 @@ const styles = StyleSheet.create({
   },
   badgeEnabled: { backgroundColor: "rgba(34,197,94,0.12)" },
   note: { textAlign: "center", paddingHorizontal: space.md },
+  developmentCard: {
+    gap: space.md,
+    padding: space.md,
+    borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: color.borderStrong,
+    backgroundColor: color.surfaceMuted,
+  },
+  developmentHeading: { flexDirection: "row", alignItems: "center", gap: space.md },
+  testStatus: { textAlign: "center" },
 });
