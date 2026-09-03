@@ -6,6 +6,7 @@ import { openCookieSettings } from "@/lib/cookieConsent";
 const policyLinks = [
   ["Terms of Service", "/terms"],
   ["Privacy Policy", "/privacy"],
+  ["Delete Account", "/delete-account"],
   ["Cookie Policy", "/cookies"],
   ["Support", "/support"],
 ];

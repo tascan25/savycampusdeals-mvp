@@ -14,7 +14,7 @@ const faqs = [
   ["My verification code did not arrive. What now?", "Check spam and promotions, confirm the email shown on the verification screen, then request a new code after the one-minute cooldown."],
   ["How long does student verification take?", "College-email verification may be instant. Document submissions are normally reviewed within 24 hours, though busy periods can take longer."],
   ["A deal is not working at an outlet.", "Check the offer conditions and expiry first. If it should be valid, email us the offer name, outlet and what happened—never send your password or OTP."],
-  ["How do I delete my account?", "While signed in, open Account from your profile icon and use Delete account in the Danger zone. You will need your password and must confirm the permanent deletion."],
+  ["How do I delete my account?", "In the mobile app, open Profile, then Settings and Delete account. On the website, open Account from your profile icon and use Delete account in the Danger zone. If you cannot sign in, visit our public account-deletion page to send a request."],
 ];
 
 export default function Support() {
@@ -66,6 +66,10 @@ export default function Support() {
           <div><p className="text-xs font-bold uppercase tracking-[0.22em] text-indigo-300">Still stuck?</p><h2 className="mt-2 font-display text-2xl font-extrabold">Talk to a human.</h2><p className="mt-2 text-sm text-zinc-400">Include your registered email and a short description. Never share your password or OTP.</p></div>
           <a href="mailto:savycampus@gmail.com?subject=Savvy%20Support%20Request" className="mt-5 inline-flex shrink-0 items-center gap-2 rounded-full bg-white px-5 py-3 text-sm font-bold text-black sm:mt-0"><Mail size={16} /> Email Support</a>
         </section>
+
+        <p className="mt-5 text-center text-sm text-zinc-500">
+          Need to remove your account? Read the public <Link to="/delete-account" className="text-indigo-300 hover:text-indigo-200">account-deletion instructions</Link>.
+        </p>
       </main>
       <SiteFooter />
     </div>
