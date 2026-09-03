@@ -14,11 +14,7 @@ import {
 import { AppState, Linking, Platform } from "react-native";
 
 import { apiListCoupons } from "@/api/coupons";
-import {
-  apiMarkPushOpened,
-  apiRegisterPushDevice,
-  apiUnregisterPushDevice,
-} from "@/api/push";
+import { apiMarkPushOpened, apiRegisterPushDevice, apiUnregisterPushDevice } from "@/api/push";
 import { apiGetSavvyPointsOverview } from "@/api/rewards";
 import { NotificationPermissionSheet } from "@/components/NotificationPermissionSheet";
 import { useAuth } from "@/providers/AuthProvider";
@@ -182,7 +178,7 @@ export function PushNotificationProvider({ children }: PropsWithChildren) {
       const deliveryId = typeof data.delivery_id === "string" ? data.delivery_id : "";
       const route = typeof data.route === "string" ? data.route : "";
       if (deliveryId) await apiMarkPushOpened(deliveryId).catch(() => undefined);
-      const resolved = resolveCtaRoute(route);
+      const resolved = resolveCtaRoute(route, user.role);
       if ("external" in resolved) {
         await Linking.openURL(resolved.external).catch(() => undefined);
       } else {

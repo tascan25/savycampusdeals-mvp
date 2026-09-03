@@ -83,7 +83,7 @@ export function AnnouncementProvider({ children }: PropsWithChildren) {
       await apiMarkAnnouncementClicked(announcement.id).catch(() => undefined);
       setSpotlight(null);
       setCentreOpen(false);
-      const route = resolveCtaRoute(announcement.cta_url);
+      const route = resolveCtaRoute(announcement.cta_url, user?.role);
       if ("external" in route) {
         await Linking.openURL(route.external).catch(() => undefined);
       } else {
@@ -94,7 +94,7 @@ export function AnnouncementProvider({ children }: PropsWithChildren) {
         );
       }
     },
-    [router],
+    [router, user?.role],
   );
 
   const value = useMemo<AnnouncementContextValue>(

@@ -9,6 +9,15 @@ const student = {
 } as User;
 
 describe("getAuthGateDecision", () => {
+  const partner = {
+    ...student,
+    id: "partner-1",
+    email: "partner@example.com",
+    role: "outlet_partner",
+    email_verified: true,
+    outlet_id: "outlet-1",
+  } as User;
+
   it("moves a newly registered student from signup to OTP", () => {
     expect(getAuthGateDecision(student, ["(auth)", "register"])).toBe("otp");
   });
@@ -37,5 +46,20 @@ describe("getAuthGateDecision", () => {
 
   it("returns a signed-out deep link to login", () => {
     expect(getAuthGateDecision(null, ["offer", "123"])).toBe("login");
+  });
+
+  it("routes an outlet partner login into the partner shell", () => {
+    expect(getAuthGateDecision(partner, ["(auth)", "login-password"])).toBe("partner");
+  });
+
+  it("keeps outlet partners out of student tabs", () => {
+    expect(getAuthGateDecision(partner, ["(tabs)", "index"])).toBe("partner");
+    expect(getAuthGateDecision(partner, ["offer", "some-id"])).toBe("partner");
+    expect(getAuthGateDecision(partner, ["(partner)", "activity"])).toBeNull();
+    expect(getAuthGateDecision(partner, ["settings", "sessions"])).toBeNull();
+  });
+
+  it("keeps student accounts out of partner tabs", () => {
+    expect(getAuthGateDecision(student, ["(partner)", "scan"])).toBe("tabs");
   });
 });

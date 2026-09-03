@@ -15,6 +15,7 @@ export default function SettingsLayout() {
       <Stack.Screen name="profile-details" options={{ title: "Personal details" }} />
       <Stack.Screen name="avatar" options={{ title: "Choose avatar" }} />
       <Stack.Screen name="sessions" options={{ title: "Active sessions" }} />
+      <Stack.Screen name="change-password" options={{ title: "Change password" }} />
       <Stack.Screen name="notifications" options={{ title: "Notifications" }} />
       <Stack.Screen name="delete-account" options={{ title: "Delete account" }} />
     </Stack>

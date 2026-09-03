@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import Constants from "expo-constants";
 import { useRouter } from "expo-router";
 import { type ReactNode, useState } from "react";
 import { Alert, Linking, Pressable, ScrollView, StyleSheet, Switch, View } from "react-native";
@@ -88,6 +89,7 @@ export default function ProfileTab() {
   if (!user) return null;
   const verified = user.verification_status === "approved";
   const memberSince = user.created_at ? new Date(user.created_at).getFullYear().toString() : "—";
+  const appVersion = Constants.nativeAppVersion ?? Constants.expoConfig?.version ?? "1.0.0";
 
   const onToggleLock = async (next: boolean) => {
     setTogglingLock(true);
@@ -290,7 +292,7 @@ export default function ProfileTab() {
           </AppText>
         </Pressable>
         <AppText variant="caption" color={color.textTertiary} style={styles.version}>
-          Savvy Campus · Mobile member experience
+          Savvy Campus · Version {appVersion}
         </AppText>
       </ScrollView>
     </Screen>

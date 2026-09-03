@@ -45,6 +45,8 @@ export default function LoginPasswordScreen() {
       const signedInUser = await login(values.email.trim().toLowerCase(), values.password);
       if (signedInUser.role === "student" && !signedInUser.email_verified) {
         router.replace({ pathname: "/(auth)/verify-otp", params: { email: signedInUser.email } });
+      } else if (signedInUser.role === "outlet_partner") {
+        router.replace("/(partner)" as never);
       } else {
         router.replace("/(tabs)");
       }

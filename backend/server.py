@@ -621,6 +621,21 @@ async def get_verified_user(request: Request) -> dict:
     return user
 
 
+async def get_student_user(request: Request) -> dict:
+    """Require a student account for student-owned app data and actions."""
+    user = await get_current_user(request)
+    if user.get("role", "student") != "student":
+        raise HTTPException(403, "Student access required")
+    return user
+
+
+async def get_verified_student(request: Request) -> dict:
+    user = await get_student_user(request)
+    if not user.get("email_verified"):
+        raise HTTPException(403, "Please verify your email before continuing.")
+    return user
+
+
 def set_auth_cookie(response: Response, token: str):
     response.set_cookie(
         key="access_token",
@@ -1117,6 +1132,11 @@ class ForgotIn(BaseModel):
 class ResetIn(BaseModel):
     token: str
     password: str = Field(min_length=8)
+
+
+class ChangePasswordIn(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
 
 
 class ProfileUpdateIn(BaseModel):
@@ -2321,6 +2341,31 @@ async def mobile_logout_all(user=Depends(get_current_user)):
     return {"ok": True, "revoked_count": result.modified_count}
 
 
+@api.post("/auth/change-password")
+async def change_password(
+    body: ChangePasswordIn,
+    response: Response,
+    user=Depends(get_current_user),
+):
+    if not verify_password(body.current_password, user.get("password_hash", "")):
+        raise HTTPException(400, "Current password is incorrect")
+    validate_password(body.new_password)
+    if verify_password(body.new_password, user.get("password_hash", "")):
+        raise HTTPException(400, "New password must be different from the current password")
+    now = datetime.now(timezone.utc)
+    await db.users.update_one(
+        {"_id": user["_id"]},
+        {"$set": {"password_hash": hash_password(body.new_password), "password_changed_at": now}},
+    )
+    revoked = await db.sessions.update_many(
+        {"user_id": user["_id"], "revoked": False},
+        {"$set": {"revoked": True, "revoked_at": now, "revoked_reason": "password_changed"}},
+    )
+    await db.device_tokens.delete_many({"user_id": user["_id"]})
+    response.delete_cookie("access_token", path="/")
+    return {"ok": True, "revoked_count": revoked.modified_count}
+
+
 @api.get("/auth/mobile/sessions")
 async def mobile_sessions(user=Depends(get_current_user)):
     now = datetime.now(timezone.utc)
@@ -2988,6 +3033,227 @@ async def partner_profile(scanner=Depends(get_scanner_user)):
         "email": scanner.get("email", ""),
         "role": scanner.get("role", ""),
         "outlet": serialize_outlet(outlet) if outlet else None,
+    }
+
+
+def _partner_period_bounds(period: str) -> tuple[Optional[datetime], datetime, int]:
+    """Return India-local whole-day bounds for the partner dashboard."""
+    days_by_period = {"today": 1, "7d": 7, "30d": 30}
+    if period == "all":
+        tomorrow = (datetime.now(INDIA_TIMEZONE) + timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        return None, tomorrow.astimezone(timezone.utc), 0
+    days = days_by_period.get(period)
+    if not days:
+        raise HTTPException(400, "Period must be today, 7d, 30d, or all")
+    local_today = datetime.now(INDIA_TIMEZONE).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    return (
+        (local_today - timedelta(days=days - 1)).astimezone(timezone.utc),
+        (local_today + timedelta(days=1)).astimezone(timezone.utc),
+        days,
+    )
+
+
+def _partner_activity_item(
+    coupon: dict,
+    offer: Optional[dict],
+    student: Optional[dict],
+    now: Optional[datetime] = None,
+) -> dict:
+    """Privacy-minimised coupon activity exposed to the assigned outlet."""
+    return {
+        "id": str(coupon["_id"]),
+        "code": coupon.get("code", ""),
+        "status": _report_coupon_status(coupon, now),
+        "student_name": (student or {}).get("name", ""),
+        "student_number": (student or {}).get("student_number", ""),
+        "offer_id": str(coupon.get("offer_id", "")),
+        "offer_title": (offer or {}).get("title", "Unavailable offer"),
+        "discount": (offer or {}).get("discount", ""),
+        "claimed_at": _admin_datetime(coupon.get("created_at")),
+        "expires_at": _admin_datetime(coupon.get("expires_at")),
+        "redeemed_at": _admin_datetime(coupon.get("redeemed_at")),
+    }
+
+
+async def _partner_coupon_rows(
+    outlet_id: ObjectId,
+    start: Optional[datetime],
+    end: datetime,
+) -> tuple[list[dict], dict, dict]:
+    query = _with_date_range(
+        {"outlet_id": outlet_id, "status": {"$ne": "archived"}},
+        "created_at",
+        start,
+        end,
+    )
+    coupons = await db.coupons.find(query).sort("created_at", -1).to_list(None)
+    offer_ids = {item.get("offer_id") for item in coupons if item.get("offer_id")}
+    student_ids = {item.get("user_id") for item in coupons if item.get("user_id")}
+    offers, students = await asyncio.gather(
+        db.offers.find({"_id": {"$in": list(offer_ids)}}).to_list(len(offer_ids) or 1),
+        db.users.find(
+            {"_id": {"$in": list(student_ids)}, "role": "student"},
+            {"name": 1, "student_number": 1},
+        ).to_list(len(student_ids) or 1),
+    )
+    return (
+        coupons,
+        {item["_id"]: item for item in offers},
+        {item["_id"]: item for item in students},
+    )
+
+
+@api.get("/partner/dashboard")
+async def partner_dashboard(
+    period: str = Query("today"), scanner=Depends(get_scanner_user)
+):
+    start, end, days = _partner_period_bounds(period)
+    outlet_id = scanner["outlet_id"]
+    outlet, own_offers = await asyncio.gather(
+        db.outlets.find_one({"_id": outlet_id}),
+        db.offers.find({"outlet_id": outlet_id}).sort("created_at", -1).to_list(200),
+    )
+    if not outlet:
+        raise HTTPException(404, "Assigned outlet not found")
+    coupons, offer_by_id, student_by_id = await _partner_coupon_rows(
+        outlet_id, start, end
+    )
+    now = datetime.now(timezone.utc)
+    statuses = [_report_coupon_status(item, now) for item in coupons]
+    redeemed = statuses.count("redeemed")
+
+    offer_stats = []
+    for offer in own_offers:
+        related = [item for item in coupons if item.get("offer_id") == offer["_id"]]
+        related_statuses = [_report_coupon_status(item, now) for item in related]
+        offer_stats.append(
+            {
+                "offer": serialize_offer(offer),
+                "claimed": len(related),
+                "active": related_statuses.count("active"),
+                "redeemed": related_statuses.count("redeemed"),
+                "expired": related_statuses.count("expired"),
+                "redemption_rate": round(
+                    related_statuses.count("redeemed") / len(related) * 100, 1
+                )
+                if related
+                else 0,
+            }
+        )
+
+    trend = []
+    if days and start:
+        local_start = start.astimezone(INDIA_TIMEZONE).date()
+        for offset in range(days):
+            day = local_start + timedelta(days=offset)
+            trend.append({"date": day.isoformat(), "claimed": 0, "redeemed": 0})
+        trend_by_date = {item["date"]: item for item in trend}
+        for coupon in coupons:
+            claimed_at = _aware(coupon.get("created_at"))
+            redeemed_at = _aware(coupon.get("redeemed_at"))
+            if claimed_at:
+                key = claimed_at.astimezone(INDIA_TIMEZONE).date().isoformat()
+                if key in trend_by_date:
+                    trend_by_date[key]["claimed"] += 1
+            if redeemed_at:
+                key = redeemed_at.astimezone(INDIA_TIMEZONE).date().isoformat()
+                if key in trend_by_date:
+                    trend_by_date[key]["redeemed"] += 1
+
+    recent = [
+        _partner_activity_item(
+            item,
+            offer_by_id.get(item.get("offer_id")),
+            student_by_id.get(item.get("user_id")),
+            now,
+        )
+        for item in coupons[:8]
+    ]
+    return {
+        "period": period,
+        "outlet": serialize_outlet(outlet, len(own_offers)),
+        "summary": {
+            "claimed": len(coupons),
+            "active": statuses.count("active"),
+            "redeemed": redeemed,
+            "expired": statuses.count("expired"),
+            "unique_students": len(
+                {item.get("user_id") for item in coupons if item.get("user_id")}
+            ),
+            "redemption_rate": round(redeemed / len(coupons) * 100, 1)
+            if coupons
+            else 0,
+        },
+        "trend": trend,
+        "offers": offer_stats,
+        "recent": recent,
+    }
+
+
+@api.get("/partner/activity")
+async def partner_activity(
+    period: str = Query("30d"),
+    status: Optional[str] = Query(None),
+    offer_id: Optional[str] = Query(None),
+    q: Optional[str] = Query(None, max_length=100),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(30, ge=1, le=100),
+    scanner=Depends(get_scanner_user),
+):
+    if status and status not in {"active", "redeemed", "expired"}:
+        raise HTTPException(400, "Invalid coupon status")
+    selected_offer_id = None
+    if offer_id:
+        try:
+            selected_offer_id = ObjectId(offer_id)
+        except Exception:
+            raise HTTPException(404, "Offer not found")
+        if not await db.offers.find_one(
+            {"_id": selected_offer_id, "outlet_id": scanner["outlet_id"]}, {"_id": 1}
+        ):
+            raise HTTPException(404, "Offer not found")
+    start, end, _ = _partner_period_bounds(period)
+    coupons, offer_by_id, student_by_id = await _partner_coupon_rows(
+        scanner["outlet_id"], start, end
+    )
+    now = datetime.now(timezone.utc)
+    items = [
+        _partner_activity_item(
+            item,
+            offer_by_id.get(item.get("offer_id")),
+            student_by_id.get(item.get("user_id")),
+            now,
+        )
+        for item in coupons
+        if not selected_offer_id or item.get("offer_id") == selected_offer_id
+    ]
+    if status:
+        items = [item for item in items if item["status"] == status]
+    if q and q.strip():
+        needle = q.strip().casefold()
+        items = [
+            item
+            for item in items
+            if needle
+            in " ".join(
+                [
+                    item["code"],
+                    item["student_name"],
+                    item["student_number"],
+                    item["offer_title"],
+                ]
+            ).casefold()
+        ]
+    total = len(items)
+    return {
+        "items": items[(page - 1) * page_size : page * page_size],
+        "page": page,
+        "page_size": page_size,
+        "total": total,
     }
 
 
@@ -7505,7 +7771,7 @@ async def get_offer(offer_id: str, request: Request):
 
 
 @api.post("/offers/{offer_id}/save")
-async def toggle_save(offer_id: str, user=Depends(get_current_user)):
+async def toggle_save(offer_id: str, user=Depends(get_student_user)):
     oid = ObjectId(offer_id)
     existing = await db.saved_offers.find_one({"user_id": user["_id"], "offer_id": oid})
     if existing:
@@ -7522,7 +7788,7 @@ async def toggle_save(offer_id: str, user=Depends(get_current_user)):
 
 
 @api.get("/saved")
-async def list_saved(user=Depends(get_current_user)):
+async def list_saved(user=Depends(get_student_user)):
     saved = await db.saved_offers.find({"user_id": user["_id"]}).to_list(200)
     ids = [s["offer_id"] for s in saved]
     if not ids:
@@ -7689,7 +7955,7 @@ def serialize_coupon(
 
 
 @api.post("/offers/{offer_id}/claim")
-async def claim_offer(offer_id: str, user=Depends(get_verified_user)):
+async def claim_offer(offer_id: str, user=Depends(get_verified_student)):
     if user.get("verification_status") != "approved":
         raise HTTPException(403, "Get verified to claim offers")
     try:
@@ -7913,7 +8179,7 @@ async def claim_offer(offer_id: str, user=Depends(get_verified_user)):
 
 
 @api.get("/coupons")
-async def my_coupons(user=Depends(get_current_user)):
+async def my_coupons(user=Depends(get_student_user)):
     coupons = (
         await db.coupons.find(
             {
@@ -7933,7 +8199,7 @@ async def my_coupons(user=Depends(get_current_user)):
 
 
 @api.get("/brand-offer-claims")
-async def my_brand_offer_claims(user=Depends(get_current_user)):
+async def my_brand_offer_claims(user=Depends(get_student_user)):
     """Return new claims plus a non-mutating view of legacy brand coupons."""
     claims = (
         await db.brand_offer_claims.find({"user_id": user["_id"]})
@@ -7995,7 +8261,7 @@ async def my_brand_offer_claims(user=Depends(get_current_user)):
 
 
 @api.get("/coupons/{coupon_id}")
-async def get_coupon(coupon_id: str, user=Depends(get_current_user)):
+async def get_coupon(coupon_id: str, user=Depends(get_student_user)):
     c = await db.coupons.find_one(
         {
             "_id": ObjectId(coupon_id),
@@ -8014,7 +8280,7 @@ async def get_coupon(coupon_id: str, user=Depends(get_current_user)):
 # Dashboard stats
 # -----------------------------
 @api.get("/dashboard/stats")
-async def dashboard_stats(user=Depends(get_current_user)):
+async def dashboard_stats(user=Depends(get_student_user)):
     outlet_coupon_query = {
         "user_id": user["_id"],
         "outlet_id": {"$ne": None},
@@ -8062,7 +8328,7 @@ async def dashboard_stats(user=Depends(get_current_user)):
 
 @api.get("/savvy-points/overview")
 async def savvy_points_overview(
-    limit: int = Query(8, ge=1, le=25), user=Depends(get_current_user)
+    limit: int = Query(8, ge=1, le=25), user=Depends(get_student_user)
 ):
     await ensure_savvy_point_fields(user["_id"])
     if effective_verification_status(user) == "approved":
@@ -9406,6 +9672,10 @@ async def on_startup():
         await db.coupons.create_index([("user_id", 1), ("offer_id", 1), ("status", 1)])
         await db.coupons.create_index(
             [("outlet_id", 1), ("status", 1), ("redeemed_at", -1)]
+        )
+        await db.coupons.create_index(
+            [("outlet_id", 1), ("created_at", -1)],
+            name="partner_activity_by_claim_time",
         )
         await db.brand_offer_claims.create_index(
             [("user_id", 1), ("offer_id", 1)], unique=True

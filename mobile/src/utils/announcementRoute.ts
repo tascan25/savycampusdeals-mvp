@@ -7,8 +7,22 @@ export type ResolvedCtaRoute =
  * mapping for the paths admins are likely to actually use; anything else
  * falls back to Home rather than doing nothing.
  */
-export function resolveCtaRoute(ctaUrl: string): ResolvedCtaRoute {
+export function resolveCtaRoute(
+  ctaUrl: string,
+  role: "student" | "admin" | "outlet_partner" | "event_staff" = "student",
+): ResolvedCtaRoute {
   if (/^https?:\/\//i.test(ctaUrl)) return { external: ctaUrl };
+  if (role === "outlet_partner") {
+    if (ctaUrl.startsWith("/scan")) return { push: "/(partner)/scan" };
+    if (ctaUrl.startsWith("/activity")) return { push: "/(partner)/activity" };
+    if (ctaUrl.startsWith("/offers") || ctaUrl.startsWith("/outlets")) {
+      return { push: "/(partner)/explore" };
+    }
+    if (ctaUrl.startsWith("/profile") || ctaUrl.startsWith("/account")) {
+      return { push: "/(partner)/account" };
+    }
+    return { push: "/(partner)" };
+  }
   if (ctaUrl.startsWith("/verify")) return { push: "/verify" };
   const offer = ctaUrl.match(/^\/offers?\/([^/?#]+)/i);
   if (offer?.[1]) return { push: "/offer/[id]", params: { id: offer[1] } };

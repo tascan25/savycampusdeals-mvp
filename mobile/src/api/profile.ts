@@ -27,3 +27,13 @@ export async function apiListMobileSessions(): Promise<MobileSessionSummary[]> {
 export async function apiDeleteAccount(password: string, confirmation: string): Promise<void> {
   await apiClient.delete("/account", { data: { password, confirmation } });
 }
+
+export async function apiChangePassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> {
+  await apiClient.post("/auth/change-password", {
+    current_password: currentPassword,
+    new_password: newPassword,
+  });
+}

@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText, Button } from "@/design-system/components";
 import { color, radius, space } from "@/design-system/tokens";
+import { useAuth } from "@/providers/AuthProvider";
 
 export function NotificationPermissionSheet({
   visible,
@@ -19,6 +20,8 @@ export function NotificationPermissionSheet({
   onDismiss: () => void;
 }) {
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
+  const isPartner = user?.role === "outlet_partner";
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onDismiss}>
       <View style={styles.backdrop}>
@@ -27,7 +30,9 @@ export function NotificationPermissionSheet({
           onPress={onDismiss}
           accessibilityLabel="Dismiss notification permission message"
         />
-        <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, space.md) + space.sm }]}>
+        <View
+          style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, space.md) + space.sm }]}
+        >
           <View style={styles.handle} />
           <View style={styles.brandRow}>
             <View style={styles.logoWrap}>
@@ -42,9 +47,13 @@ export function NotificationPermissionSheet({
             </View>
           </View>
           <View style={styles.copy}>
-            <AppText variant="h2">Never miss a deal you claimed.</AppText>
+            <AppText variant="h2">
+              {isPartner ? "Keep your outlet in sync." : "Never miss a deal you claimed."}
+            </AppText>
             <AppText variant="body" color={color.textSecondary}>
-              Allow Savvy to remind you before coupons, rewards and student verification expire.
+              {isPartner
+                ? "Allow Savvy to send partner announcements and important account updates."
+                : "Allow Savvy to remind you before coupons, rewards and student verification expire."}{" "}
               You can change this anytime in system settings.
             </AppText>
           </View>
@@ -57,7 +66,8 @@ export function NotificationPermissionSheet({
             <Button label="Not now" variant="secondary" onPress={onDismiss} disabled={working} />
           </View>
           <AppText variant="caption" color={color.textTertiary} style={styles.note}>
-            We never put coupon codes, verification documents or sensitive details in notifications.
+            We never put coupon codes, verification documents or sensitive account details in
+            notifications.
           </AppText>
         </View>
       </View>

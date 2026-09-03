@@ -39,4 +39,10 @@ export const queryKeys = {
   announcements: {
     list: () => ["announcements"] as const,
   },
+  partner: {
+    root: () => ["partner"] as const,
+    profile: () => ["partner", "profile"] as const,
+    dashboard: (period: string) => ["partner", "dashboard", period] as const,
+    activity: (filters: Record<string, unknown>) => ["partner", "activity", filters] as const,
+  },
 } as const;

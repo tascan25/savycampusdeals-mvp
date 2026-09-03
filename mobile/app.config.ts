@@ -30,7 +30,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   name: APP_NAME,
   slug: APP_SLUG,
   scheme: URL_SCHEME,
-  version: "0.1.0",
+  version: "1.0.0",
   orientation: "portrait",
   icon: "./assets/icon.png",
   userInterfaceStyle: "dark",
@@ -93,6 +93,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       {
         cameraPermission: "Allow $(PRODUCT_NAME) to use your camera for student verification.",
         photosPermission: "Allow $(PRODUCT_NAME) to access your photos for student verification.",
+      },
+    ],
+    [
+      "expo-camera",
+      {
+        cameraPermission: "Allow $(PRODUCT_NAME) to scan Savvy student and coupon QR codes.",
+        recordAudioAndroid: false,
+        barcodeScannerEnabled: true,
       },
     ],
     // Local iOS notifications do not require APNs. Keep this last so it

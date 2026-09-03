@@ -37,6 +37,7 @@ function RootNavigator() {
     >
       <Stack.Screen name="(auth)" />
       <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="(partner)" />
       <Stack.Screen
         name="rewards"
         options={{

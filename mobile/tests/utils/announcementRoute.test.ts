@@ -35,4 +35,16 @@ describe("resolveCtaRoute", () => {
   it("falls back to Home for an unmapped relative path", () => {
     expect(resolveCtaRoute("/dashboard")).toEqual({ push: "/(tabs)" });
   });
+
+  it("keeps partner announcements inside the partner interface", () => {
+    expect(resolveCtaRoute("/scan", "outlet_partner")).toEqual({
+      push: "/(partner)/scan",
+    });
+    expect(resolveCtaRoute("/offers", "outlet_partner")).toEqual({
+      push: "/(partner)/explore",
+    });
+    expect(resolveCtaRoute("/dashboard", "outlet_partner")).toEqual({
+      push: "/(partner)",
+    });
+  });
 });

@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 from bson import ObjectId
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_DIR))
@@ -437,6 +437,47 @@ def test_mobile_logout_all_revokes_every_session_and_clears_push_tokens(monkeypa
     assert result["revoked_count"] == 2
     assert all(doc["revoked"] for doc in sessions.docs.values())
     assert all(doc["revoked_reason"] == "logout_all" for doc in sessions.docs.values())
+    assert device_tokens.delete_many_calls == [{"user_id": user["_id"]}]
+
+
+def test_change_password_revokes_sessions_and_push_tokens(monkeypatch):
+    user = _student(role="outlet_partner")
+    sessions = FakeSessions()
+    device_tokens = FakeDeviceTokens()
+    users = FakeUsers([user])
+    monkeypatch.setattr(
+        server,
+        "db",
+        SimpleNamespace(users=users, sessions=sessions, device_tokens=device_tokens),
+    )
+    now = datetime.now(timezone.utc)
+    asyncio.run(
+        sessions.insert_one(
+            {
+                "user_id": user["_id"],
+                "refresh_token_hash": "active-session",
+                "family_id": "family",
+                "created_at": now,
+                "last_used_at": now,
+                "expires_at": now + timedelta(days=1),
+                "revoked": False,
+            }
+        )
+    )
+
+    result = asyncio.run(
+        server.change_password(
+            server.ChangePasswordIn(
+                current_password="Correct@123", new_password="Updated@456"
+            ),
+            Response(),
+            user=user,
+        )
+    )
+
+    assert result["revoked_count"] == 1
+    assert server.verify_password("Updated@456", users.users[user["_id"]]["password_hash"])
+    assert next(iter(sessions.docs.values()))["revoked_reason"] == "password_changed"
     assert device_tokens.delete_many_calls == [{"user_id": user["_id"]}]
 
 

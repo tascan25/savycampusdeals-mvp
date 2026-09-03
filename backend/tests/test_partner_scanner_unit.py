@@ -46,6 +46,46 @@ def test_admin_scanner_retains_support_access():
     server.ensure_scanner_coupon_access({"role": "admin"}, {"outlet_id": None})
 
 
+def test_student_only_dependency_rejects_partner(monkeypatch):
+    async def current_user(_request):
+        return {"_id": ObjectId(), "role": "outlet_partner"}
+
+    monkeypatch.setattr(server, "get_current_user", current_user)
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(server.get_student_user(object()))
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "Student access required"
+
+
+def test_partner_period_rejects_unknown_value():
+    with pytest.raises(HTTPException) as exc:
+        server._partner_period_bounds("quarter")
+
+    assert exc.value.status_code == 400
+
+
+def test_partner_activity_item_does_not_expose_student_email():
+    item = server._partner_activity_item(
+        {
+            "_id": ObjectId(),
+            "offer_id": ObjectId(),
+            "code": "SCD-PRIVATE",
+            "status": "active",
+            "created_at": datetime.now(timezone.utc),
+        },
+        {"title": "Student lunch", "discount": "20% off"},
+        {
+            "name": "Unit Student",
+            "student_number": "SCD-2026-UNIT",
+            "email": "private@example.com",
+        },
+    )
+
+    assert item["student_name"] == "Unit Student"
+    assert "student_email" not in item
+
+
 class FakeCollection:
     def __init__(self, document=None):
         self.document = document

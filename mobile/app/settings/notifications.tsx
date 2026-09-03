@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { AppText, Button, Screen } from "@/design-system/components";
 import { color, radius, space } from "@/design-system/tokens";
 import { usePushNotifications } from "@/providers/PushNotificationProvider";
+import { useAuth } from "@/providers/AuthProvider";
 import {
   cancelAllManagedLocalNotifications,
   getManagedLocalNotificationCount,
@@ -13,6 +14,8 @@ import {
 } from "@/services/localNotifications";
 
 export default function NotificationSettingsScreen() {
+  const { user } = useAuth();
+  const isStudent = user?.role === "student";
   const { permission, enable, openSystemSettings, refresh, reconcileReminders } =
     usePushNotifications();
   const [working, setWorking] = useState(false);
@@ -34,10 +37,7 @@ export default function NotificationSettingsScreen() {
   const enabled = permission === "enabled";
   const denied = permission === "denied";
 
-  const runDevelopmentAction = async (
-    action: () => Promise<string | void>,
-    success: string,
-  ) => {
+  const runDevelopmentAction = async (action: () => Promise<string | void>, success: string) => {
     setWorking(true);
     setTestStatus("");
     try {
@@ -62,8 +62,10 @@ export default function NotificationSettingsScreen() {
         <View style={styles.intro}>
           <AppText variant="h1">Stay in the loop</AppText>
           <AppText variant="body" color={color.textSecondary}>
-            Get verification updates, coupon reminders and occasional campus deal announcements. You
-            remain in control through your device&apos;s notification settings.
+            {isStudent
+              ? "Get verification updates, coupon reminders and occasional campus deal announcements."
+              : "Get partner announcements and important outlet account updates."}{" "}
+            You remain in control through your device&apos;s notification settings.
           </AppText>
         </View>
 
@@ -90,7 +92,11 @@ export default function NotificationSettingsScreen() {
         </View>
 
         {enabled || denied ? (
-          <Button label="Open system notification settings" variant="secondary" onPress={openSystemSettings} />
+          <Button
+            label="Open system notification settings"
+            variant="secondary"
+            onPress={openSystemSettings}
+          />
         ) : (
           <>
             <Button
@@ -101,18 +107,15 @@ export default function NotificationSettingsScreen() {
           </>
         )}
 
-        {enabled ? (
+        {enabled && isStudent ? (
           <Button
             label="Refresh scheduled reminders"
             variant="secondary"
             onPress={() =>
-              void runDevelopmentAction(
-                async () => {
-                  const count = await reconcileReminders();
-                  return `${count} reminder${count === 1 ? "" : "s"} scheduled.`;
-                },
-                "Reminders refreshed.",
-              )
+              void runDevelopmentAction(async () => {
+                const count = await reconcileReminders();
+                return `${count} reminder${count === 1 ? "" : "s"} scheduled.`;
+              }, "Reminders refreshed.")
             }
             disabled={working}
           />
@@ -132,10 +135,7 @@ export default function NotificationSettingsScreen() {
             <Button
               label="Show test notification now"
               onPress={() =>
-                void runDevelopmentAction(
-                  presentDevelopmentNotification,
-                  "Test notification sent.",
-                )
+                void runDevelopmentAction(presentDevelopmentNotification, "Test notification sent.")
               }
               disabled={!enabled || working}
             />
@@ -143,12 +143,9 @@ export default function NotificationSettingsScreen() {
               label="Schedule test in 10 seconds"
               variant="secondary"
               onPress={() =>
-                void runDevelopmentAction(
-                  async () => {
-                    await scheduleDevelopmentNotification(10);
-                  },
-                  "Test scheduled. Background the app now.",
-                )
+                void runDevelopmentAction(async () => {
+                  await scheduleDevelopmentNotification(10);
+                }, "Test scheduled. Background the app now.")
               }
               disabled={!enabled || working}
             />
@@ -156,13 +153,10 @@ export default function NotificationSettingsScreen() {
               label="Count managed reminders"
               variant="secondary"
               onPress={() =>
-                void runDevelopmentAction(
-                  async () => {
-                    const count = await getManagedLocalNotificationCount();
-                    return `${count} managed reminder${count === 1 ? "" : "s"} scheduled.`;
-                  },
-                  "Reminder count refreshed.",
-                )
+                void runDevelopmentAction(async () => {
+                  const count = await getManagedLocalNotificationCount();
+                  return `${count} managed reminder${count === 1 ? "" : "s"} scheduled.`;
+                }, "Reminder count refreshed.")
               }
               disabled={working}
             />
