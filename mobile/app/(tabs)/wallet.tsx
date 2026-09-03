@@ -2,12 +2,13 @@ import { Ionicons } from "@expo/vector-icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import { useMemo, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, View } from "react-native";
+import { FlatList, Pressable, StyleSheet, View } from "react-native";
 
 import { apiListCoupons } from "@/api/coupons";
 import { queryKeys } from "@/api/queryKeys";
 import { CouponCompactRow, CouponTicket } from "@/components/CouponTicket";
 import { CouponDetailModal } from "@/components/CouponDetailModal";
+import { LoadingShimmer } from "@/components/LoadingShimmer";
 import { AppText, Screen, SegmentedControl } from "@/design-system/components";
 import { color, radius, space } from "@/design-system/tokens";
 import { useAnnouncements } from "@/providers/AnnouncementProvider";
@@ -103,7 +104,11 @@ export default function WalletTab() {
         }
         ListEmptyComponent={
           couponsQuery.isLoading ? (
-            <ActivityIndicator color={color.primary} style={styles.loader} />
+            <View style={styles.walletSkeleton}>
+              <LoadingShimmer style={styles.ticketSkeleton} />
+              <LoadingShimmer style={styles.rowSkeleton} />
+              <LoadingShimmer style={styles.rowSkeleton} />
+            </View>
           ) : (
             <View style={styles.empty}>
               <View style={styles.emptyIcon}>
@@ -197,7 +202,9 @@ const styles = StyleSheet.create({
     backgroundColor: color.destructive,
   },
   segments: { paddingHorizontal: space.lg, marginTop: space.xl },
-  loader: { marginTop: space.xxl },
+  walletSkeleton: { marginHorizontal: space.lg, marginTop: space.lg, gap: space.md },
+  ticketSkeleton: { height: 306, borderRadius: radius.lg },
+  rowSkeleton: { height: 78, borderRadius: radius.md },
   coupons: { paddingHorizontal: space.lg, marginTop: space.lg },
   compactCoupon: { marginHorizontal: space.lg, marginTop: space.md },
   firstCompactCoupon: { marginTop: space.lg },

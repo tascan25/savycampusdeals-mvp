@@ -6,6 +6,7 @@ import { FlatList, StyleSheet, View } from "react-native";
 import { apiListOfferCategories, apiListOffers } from "@/api/offers";
 import { queryKeys } from "@/api/queryKeys";
 import { OfferCard } from "@/components/OfferCard";
+import { LoadingShimmer } from "@/components/LoadingShimmer";
 import { SaveOfferFeedback } from "@/components/SaveOfferFeedback";
 import { AppText, Chip, SearchField } from "@/design-system/components";
 import { color, space } from "@/design-system/tokens";
@@ -114,13 +115,19 @@ export function DealsExplorer({ initialCategory }: { initialCategory?: string })
           </View>
         }
         ListEmptyComponent={
-          !offersQuery.isLoading ? (
+          offersQuery.isLoading ? (
+            <View style={styles.loading}>
+              <LoadingShimmer style={styles.offerSkeleton} />
+              <LoadingShimmer style={styles.offerSkeleton} />
+              <LoadingShimmer style={styles.offerSkeleton} />
+            </View>
+          ) : (
             <View style={styles.empty}>
               <AppText variant="body" color={color.textSecondary}>
                 No offers match. Try clearing filters.
               </AppText>
             </View>
-          ) : null
+          )
         }
       />
       <SaveOfferFeedback feedback={feedback} bottomOffset={72} />
@@ -136,5 +143,7 @@ const styles = StyleSheet.create({
   chipGap: { marginRight: space.sm },
   listContent: { paddingHorizontal: space.lg, paddingBottom: space.xl },
   gridItem: { marginBottom: space.md },
+  loading: { gap: space.md },
+  offerSkeleton: { height: 164 },
   empty: { padding: space.xl, alignItems: "center" },
 });

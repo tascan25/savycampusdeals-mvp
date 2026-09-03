@@ -2,12 +2,13 @@ import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import { useMemo, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, TextInput, View } from "react-native";
+import { FlatList, Pressable, StyleSheet, TextInput, View } from "react-native";
 
 import { apiListOutletCities, apiListOutlets } from "@/api/outlets";
 import { queryKeys } from "@/api/queryKeys";
 import { NearbyMapPreview } from "@/components/NearbyMapPreview";
 import { isOutletOpen, NearbyOutletRow } from "@/components/NearbyOutletRow";
+import { LoadingShimmer } from "@/components/LoadingShimmer";
 import { AppText } from "@/design-system/components";
 import { color, radius, space } from "@/design-system/tokens";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
@@ -251,7 +252,9 @@ export function OutletsExplorer() {
       ListEmptyComponent={
         outletsQuery.isLoading ? (
           <View style={styles.loading}>
-            <ActivityIndicator color={color.primary} />
+            <LoadingShimmer style={styles.outletRowSkeleton} />
+            <LoadingShimmer style={styles.outletRowSkeleton} />
+            <LoadingShimmer style={styles.outletRowSkeleton} />
           </View>
         ) : (
           <View style={styles.empty}>
@@ -360,6 +363,7 @@ const styles = StyleSheet.create({
   },
   divider: { height: StyleSheet.hairlineWidth, marginLeft: 104, backgroundColor: color.border },
   empty: { paddingVertical: space.xxl, alignItems: "center", gap: space.sm },
-  loading: { paddingVertical: space.xxl, alignItems: "center" },
+  loading: { paddingVertical: space.md, gap: space.md },
+  outletRowSkeleton: { height: 104, borderRadius: radius.md },
   emptyCopy: { textAlign: "center" },
 });

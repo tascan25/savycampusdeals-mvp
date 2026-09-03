@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import { useState } from "react";
-import { ActivityIndicator, FlatList, Linking, StyleSheet, View } from "react-native";
+import { FlatList, Linking, StyleSheet, View } from "react-native";
 
 import { apiListBrandOfferClaims, apiListCoupons } from "@/api/coupons";
 import { apiClaimOffer } from "@/api/offers";
@@ -9,6 +9,7 @@ import { queryKeys } from "@/api/queryKeys";
 import { BrandClaimListItem } from "@/components/BrandClaimListItem";
 import { CouponDetailModal } from "@/components/CouponDetailModal";
 import { CouponListItem } from "@/components/CouponListItem";
+import { LoadingShimmer } from "@/components/LoadingShimmer";
 import { AppText, SegmentedControl } from "@/design-system/components";
 import { color, space } from "@/design-system/tokens";
 import {
@@ -54,7 +55,12 @@ function PartnerCoupons({
       )}
       ListEmptyComponent={
         isLoading ? (
-          <ActivityIndicator color={color.primary} style={styles.loading} />
+          <View style={styles.gridSkeleton}>
+            <LoadingShimmer style={styles.couponSkeleton} />
+            <LoadingShimmer style={styles.couponSkeleton} />
+            <LoadingShimmer style={styles.couponSkeleton} />
+            <LoadingShimmer style={styles.couponSkeleton} />
+          </View>
         ) : (
           <EmptyState message="No partner coupons yet." onPress={onExplore} />
         )
@@ -91,7 +97,11 @@ function BrandOffers({
       ItemSeparatorComponent={() => <View style={styles.listSeparator} />}
       ListEmptyComponent={
         isLoading ? (
-          <ActivityIndicator color={color.primary} style={styles.loading} />
+          <View style={styles.listSkeleton}>
+            <LoadingShimmer style={styles.claimSkeleton} />
+            <LoadingShimmer style={styles.claimSkeleton} />
+            <LoadingShimmer style={styles.claimSkeleton} />
+          </View>
         ) : (
           <EmptyState message="No listed brand offers claimed yet." onPress={onExplore} />
         )
@@ -177,7 +187,10 @@ export function CouponsPanel() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   segmentWrap: { paddingHorizontal: space.lg, paddingVertical: space.md },
-  loading: { marginTop: space.xl },
+  gridSkeleton: { flexDirection: "row", flexWrap: "wrap", padding: space.md },
+  couponSkeleton: { width: "46%", height: 210, margin: "2%" },
+  listSkeleton: { gap: space.md, paddingHorizontal: space.lg, paddingTop: space.sm },
+  claimSkeleton: { height: 96 },
   grid: {
     flexDirection: "row",
     flexWrap: "wrap",

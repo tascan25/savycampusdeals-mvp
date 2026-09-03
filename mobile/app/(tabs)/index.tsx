@@ -16,6 +16,7 @@ import {
 import { apiListOfferCategories, apiListOffers } from "@/api/offers";
 import { apiListOutlets } from "@/api/outlets";
 import { queryKeys } from "@/api/queryKeys";
+import { LoadingShimmer } from "@/components/LoadingShimmer";
 import { OfferCard } from "@/components/OfferCard";
 import { SaveOfferFeedback } from "@/components/SaveOfferFeedback";
 import { StudentAvatar } from "@/components/StudentAvatar";
@@ -27,6 +28,13 @@ import { getCurrentCoordsIfGranted, type Coords } from "@/services/location";
 import type { Offer } from "@/types/offer";
 import type { Outlet } from "@/types/outlet";
 import { getRotatingSalutation, getTimeGreeting } from "@/utils/greeting";
+import {
+  getIndiaDateKey,
+  interleaveOffers,
+  selectDailyBrandOffers,
+  selectPopularCampusOutlets,
+  selectPopularOutletOffers,
+} from "@/utils/homeFeed";
 import { resolveMediaUrl } from "@/utils/media";
 
 function FeaturedHero({
@@ -126,8 +134,6 @@ const actions = [
   },
 ];
 
-const SPOTLIGHT_BRANDS = ["IndiGo", "Air India", "GitHub", "Cult.fit", "Spotify"] as const;
-
 function normalizeBrand(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
@@ -159,7 +165,11 @@ function OutletTile({
     offer?.discount ||
     `${outlet.offer_count} student ${outlet.offer_count === 1 ? "deal" : "deals"}`;
   const offerDetail = outlet.tagline || offer?.title || outlet.cuisine;
-  const locationLabel = [distanceLabel, outlet.address || outlet.city]
+  const locationLabel = [
+    outlet.is_favourite ? "Your favourite" : null,
+    distanceLabel,
+    outlet.address || outlet.city,
+  ]
     .filter(Boolean)
     .join("  |  ");
 
@@ -274,40 +284,20 @@ export default function HomeTab() {
     return Array.from(unique.values());
   }, [featured.data, trending.data]);
 
-  const brandSpotlightOffers = useMemo(() => {
-    return SPOTLIGHT_BRANDS.map((brand) =>
-      allOffers.find((offer) => normalizeBrand(offer.brand) === normalizeBrand(brand)),
-    ).filter((offer): offer is Offer => Boolean(offer));
-  }, [allOffers]);
-
-  const locationResultsAreLocal = Boolean(
-    coords && locatedOutlets.data?.some((outlet) => outlet.is_nearby),
+  const brandSpotlightOffers = useMemo(
+    () => selectDailyBrandOffers(allOffers, getIndiaDateKey(now), 5),
+    [allOffers, now],
   );
+
   const homeOutlets = useMemo(
-    () => (locationResultsAreLocal ? (locatedOutlets.data ?? []) : (outlets.data ?? [])),
-    [locatedOutlets.data, locationResultsAreLocal, outlets.data],
+    () => (coords ? (locatedOutlets.data ?? []) : (outlets.data ?? [])),
+    [coords, locatedOutlets.data, outlets.data],
   );
 
-  const localOutletOffers = useMemo(() => {
-    const partnerOffers = allOffers.filter(
-      (offer) => offer.offer_type === "partner_outlet" && Boolean(offer.outlet_id),
-    );
-    return homeOutlets
-      .map((outlet) => partnerOffers.find((offer) => offer.outlet_id === outlet.id))
-      .filter((offer): offer is Offer => Boolean(offer))
-      .slice(0, 3);
-  }, [allOffers, homeOutlets]);
+  const localOutletOffers = useMemo(() => selectPopularOutletOffers(allOffers, 3), [allOffers]);
 
   const spotlightOffers = useMemo(() => {
-    const mixed: Offer[] = [];
-    const total = Math.max(brandSpotlightOffers.length, localOutletOffers.length);
-    for (let index = 0; index < total; index += 1) {
-      const brandOffer = brandSpotlightOffers[index];
-      const outletOffer = localOutletOffers[index];
-      if (brandOffer) mixed.push(brandOffer);
-      if (outletOffer) mixed.push(outletOffer);
-    }
-    return mixed;
+    return interleaveOffers(brandSpotlightOffers, localOutletOffers);
   }, [brandSpotlightOffers, localOutletOffers]);
 
   useEffect(() => {
@@ -346,14 +336,7 @@ export default function HomeTab() {
       Boolean(offer.outlet_id) &&
       !spotlightOutletIds.has(offer.outlet_id),
   );
-  const campusPicks = homeOutlets
-    .filter(
-      (outlet) =>
-        !spotlightOutletIds.has(outlet.id) &&
-        outlet.id !== outletRecommendation?.outlet_id &&
-        Boolean(outlet.image_url || outlet.logo_url),
-    )
-    .slice(0, 5);
+  const campusPicks = selectPopularCampusOutlets(homeOutlets, 5);
   const campusOfferByOutletId = useMemo(() => {
     const offersByOutlet = new Map<string, Offer>();
     for (const offer of allOffers) {
@@ -391,6 +374,11 @@ export default function HomeTab() {
     outlets.isRefetching ||
     locatedOutlets.isRefetching ||
     categoriesQuery.isRefetching;
+  const homeLoading =
+    featured.isLoading ||
+    trending.isLoading ||
+    outlets.isLoading ||
+    (Boolean(coords) && locatedOutlets.isLoading);
 
   useEffect(() => {
     if (campusPicks.length < 2) return;
@@ -562,9 +550,17 @@ export default function HomeTab() {
                   ))}
                 </View>
               </View>
-            ) : (
-              <View style={styles.heroSkeleton} />
-            )}
+            ) : homeLoading ? (
+              <View style={styles.spotlightSection}>
+                <View style={styles.spotlightHeading}>
+                  <AppText variant="h2">Today&apos;s picks</AppText>
+                  <AppText variant="small" color={color.textTertiary}>
+                    Choosing today&apos;s best student deals
+                  </AppText>
+                </View>
+                <LoadingShimmer style={styles.heroSkeleton} />
+              </View>
+            ) : null}
 
             <View style={styles.actionBar}>
               {actions.map((action) => (
@@ -715,6 +711,18 @@ export default function HomeTab() {
                     ))}
                   </View>
                 ) : null}
+              </View>
+            ) : homeLoading ? (
+              <View style={styles.outletsSection}>
+                <View style={[styles.sectionHeader, styles.outletsHeader]}>
+                  <View>
+                    <AppText variant="h2">Popular near campus</AppText>
+                    <AppText variant="small" color={color.textTertiary}>
+                      Finding nearby student favourites
+                    </AppText>
+                  </View>
+                </View>
+                <LoadingShimmer style={styles.outletSkeleton} />
               </View>
             ) : null}
 
@@ -923,7 +931,6 @@ const styles = StyleSheet.create({
     height: 350,
     marginHorizontal: space.lg,
     borderRadius: radius.xl,
-    backgroundColor: color.surface,
   },
   pagination: {
     height: 24,
@@ -964,6 +971,11 @@ const styles = StyleSheet.create({
   outletsHeader: { paddingHorizontal: space.lg },
   outletRail: { paddingVertical: space.sm },
   outletCarouselItem: { alignItems: "center", justifyContent: "center" },
+  outletSkeleton: {
+    height: 390,
+    marginHorizontal: space.lg,
+    borderRadius: radius.xl,
+  },
   outletTile: {
     height: 390,
     overflow: "hidden",

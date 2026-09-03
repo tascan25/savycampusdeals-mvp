@@ -8398,8 +8398,24 @@ async def savvy_points_overview(
 # -----------------------------
 # Outlets (local restaurants/cafes)
 # -----------------------------
+def outlet_interaction_summary(coupons: list[dict]) -> tuple[dict, object]:
+    counts: dict = {}
+    for coupon in coupons:
+        outlet_id = coupon.get("outlet_id")
+        if outlet_id is not None:
+            counts[outlet_id] = counts.get(outlet_id, 0) + 1
+    favourite_outlet_id = None
+    if counts:
+        favourite_outlet_id = sorted(
+            counts,
+            key=lambda outlet_id: (-counts[outlet_id], str(outlet_id)),
+        )[0]
+    return counts, favourite_outlet_id
+
+
 @api.get("/outlets")
 async def list_outlets(
+    request: Request,
     city: Optional[str] = None,
     q: Optional[str] = None,
     lat: Optional[float] = Query(None, ge=-90, le=90),
@@ -8417,10 +8433,29 @@ async def list_outlets(
             {"address": {"$regex": q, "$options": "i"}},
         ]
     outlets = await db.outlets.find(query).to_list(200)
+    interaction_counts: dict = {}
+    favourite_outlet_id = None
+    try:
+        current_user = await get_current_user(request)
+        if current_user.get("role", "student") == "student":
+            student_coupons = await db.coupons.find(
+                {
+                    "user_id": current_user["_id"],
+                    "outlet_id": {"$ne": None},
+                    "status": {"$ne": "archived"},
+                }
+            ).to_list(5000)
+            interaction_counts, favourite_outlet_id = outlet_interaction_summary(student_coupons)
+    except HTTPException:
+        # This directory remains public; personalization is added only when authenticated.
+        pass
+
     result = []
     for o in outlets:
         count = await db.offers.count_documents({"outlet_id": o["_id"]})
         serialized = serialize_outlet(o, count)
+        serialized["interaction_count"] = interaction_counts.get(o["_id"], 0)
+        serialized["is_favourite"] = o["_id"] == favourite_outlet_id
         if lat is not None and lng is not None and o.get("lat") is not None and o.get("lng") is not None:
             distance = distance_km(lat, lng, float(o["lat"]), float(o["lng"]))
             serialized["distance_km"] = round(distance, 1)

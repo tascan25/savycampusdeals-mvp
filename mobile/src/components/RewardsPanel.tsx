@@ -2,7 +2,7 @@ import * as Clipboard from "expo-clipboard";
 import { useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { ActivityIndicator, FlatList, StyleSheet, View } from "react-native";
+import { FlatList, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
 import { apiGetSavvyPointsOverview } from "@/api/rewards";
@@ -11,6 +11,7 @@ import { CampusIconCardPreview } from "@/components/CampusIconCardPreview";
 import { AppText } from "@/design-system/components";
 import { color, radius, space } from "@/design-system/tokens";
 import { LevelRewardsSection } from "@/components/LevelRewardsSection";
+import { LoadingShimmer } from "@/components/LoadingShimmer";
 import { PointsActivityList } from "@/components/PointsActivityList";
 import { TierProgressCard } from "@/components/TierProgressCard";
 import { WaysToEarnList } from "@/components/WaysToEarnList";
@@ -46,7 +47,10 @@ export function RewardsPanel() {
   if (overviewQuery.isLoading || !overviewQuery.data) {
     return (
       <View style={styles.loading}>
-        <ActivityIndicator color={color.primary} />
+        <LoadingShimmer style={styles.titleSkeleton} />
+        <LoadingShimmer style={styles.progressSkeleton} />
+        <LoadingShimmer style={styles.rewardSkeleton} />
+        <LoadingShimmer style={styles.rewardSkeleton} />
       </View>
     );
   }
@@ -136,7 +140,10 @@ export function RewardsPanel() {
 }
 
 const styles = StyleSheet.create({
-  loading: { flex: 1, alignItems: "center", justifyContent: "center" },
+  loading: { flex: 1, padding: space.lg, gap: space.lg },
+  titleSkeleton: { width: "68%", height: 58 },
+  progressSkeleton: { height: 210, borderRadius: radius.lg },
+  rewardSkeleton: { height: 128, borderRadius: radius.lg },
   content: { padding: space.lg, paddingBottom: space.xxl },
   sectionStack: { gap: space.lg },
   intro: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },

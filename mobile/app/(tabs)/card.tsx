@@ -5,6 +5,7 @@ import { StyleSheet, View } from "react-native";
 
 import { apiGetStudentCard } from "@/api/verification";
 import { queryKeys } from "@/api/queryKeys";
+import { LoadingShimmer } from "@/components/LoadingShimmer";
 import { StudentCardView } from "@/components/StudentCardView";
 import { AppText, Button, Screen } from "@/design-system/components";
 import { color, radius, space } from "@/design-system/tokens";
@@ -56,7 +57,7 @@ export default function CardTab() {
 
         <View style={styles.cardWrap}>
           {cardQuery.isLoading || !cardQuery.data ? (
-            <View style={styles.skeleton} />
+            <LoadingShimmer style={styles.skeleton} />
           ) : (
             <StudentCardView card={cardQuery.data} />
           )}
@@ -122,6 +123,5 @@ const styles = StyleSheet.create({
   skeleton: {
     aspectRatio: 1.586,
     borderRadius: radius.lg,
-    backgroundColor: color.surface,
   },
 });

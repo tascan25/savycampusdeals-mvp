@@ -20,6 +20,10 @@ export type Outlet = {
   /** Only present when the request included lat/lng. */
   distance_km?: number | null;
   is_nearby?: boolean;
+  /** Coupon claims made by the signed-in student at this outlet. */
+  interaction_count?: number;
+  /** The signed-in student's most-claimed outlet. */
+  is_favourite?: boolean;
 };
 
 /** GET /outlets/{id} — the outlet plus its active offers and claim gating. */
