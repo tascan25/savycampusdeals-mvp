@@ -7,6 +7,7 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { apiGetSavvyPointsOverview } from "@/api/rewards";
 import { queryKeys } from "@/api/queryKeys";
+import { CampusIconCardPreview } from "@/components/CampusIconCardPreview";
 import { AppText } from "@/design-system/components";
 import { color, radius, space } from "@/design-system/tokens";
 import { LevelRewardsSection } from "@/components/LevelRewardsSection";
@@ -51,6 +52,8 @@ export function RewardsPanel() {
   }
 
   const overview = overviewQuery.data;
+  const campusIconMinimum =
+    overview.tiers.find((item) => item.key === "campus_icon")?.minimum ?? 12000;
 
   return (
     <FlatList
@@ -58,7 +61,7 @@ export function RewardsPanel() {
       renderItem={() => null}
       contentContainerStyle={styles.content}
       ListHeaderComponent={
-        <>
+        <View style={styles.sectionStack}>
           <View style={styles.intro}>
             <View>
               <AppText variant="caption" color="#A78BFA" style={styles.eyebrow}>
@@ -75,6 +78,11 @@ export function RewardsPanel() {
             lifetime={overview.lifetime}
             tier={overview.tier}
             tiers={overview.tiers}
+          />
+
+          <CampusIconCardPreview
+            unlocked={overview.lifetime >= campusIconMinimum}
+            threshold={campusIconMinimum}
           />
 
           {copiedCode ? (
@@ -121,7 +129,7 @@ export function RewardsPanel() {
             </View>
             <PointsActivityList activity={overview.activity} />
           </View>
-        </>
+        </View>
       }
     />
   );
@@ -129,7 +137,8 @@ export function RewardsPanel() {
 
 const styles = StyleSheet.create({
   loading: { flex: 1, alignItems: "center", justifyContent: "center" },
-  content: { padding: space.lg, gap: space.xl, paddingBottom: space.xxl },
+  content: { padding: space.lg, paddingBottom: space.xxl },
+  sectionStack: { gap: space.lg },
   intro: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   eyebrow: { letterSpacing: 1.4, marginBottom: 3 },
   introIcon: {
@@ -142,10 +151,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(167,139,250,0.28)",
   },
-  copiedBanner: {
-    marginTop: -space.md,
-    alignItems: "center",
-  },
+  copiedBanner: { alignItems: "center" },
   section: {
     gap: space.md,
     padding: space.md,

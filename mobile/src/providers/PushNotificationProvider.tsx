@@ -14,7 +14,11 @@ import {
 import { AppState, Linking, Platform } from "react-native";
 
 import { apiListCoupons } from "@/api/coupons";
-import { apiMarkPushOpened, apiRegisterPushDevice } from "@/api/push";
+import {
+  apiMarkPushOpened,
+  apiRegisterPushDevice,
+  apiUnregisterPushDevice,
+} from "@/api/push";
 import { apiGetSavvyPointsOverview } from "@/api/rewards";
 import { NotificationPermissionSheet } from "@/components/NotificationPermissionSheet";
 import { useAuth } from "@/providers/AuthProvider";
@@ -32,12 +36,15 @@ import { createPushDeviceRegistrar } from "@/services/pushDeviceRegistration";
 import { resolveCtaRoute } from "@/utils/announcementRoute";
 
 Notifications.setNotificationHandler({
-  handleNotification: async (notification) => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: notification.request.content.data?.play_sound === true,
-    shouldSetBadge: false,
-  }),
+  handleNotification: async (notification) => {
+    const playSound = notification.request.content.data?.play_sound;
+    return {
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: playSound === true || playSound === "true",
+      shouldSetBadge: false,
+    };
+  },
 });
 
 export type PushPermissionState = "loading" | "enabled" | "undetermined" | "denied" | "unavailable";
@@ -79,6 +86,7 @@ export function PushNotificationProvider({ children }: PropsWithChildren) {
   const [permissionPromptVisible, setPermissionPromptVisible] = useState(false);
   const [permissionPromptWorking, setPermissionPromptWorking] = useState(false);
   const handledResponses = useRef(new Set<string>());
+  const backendRegistrationState = useRef<"unknown" | "active" | "inactive">("unknown");
   const grantedPermission = useRef<"granted" | "provisional" | null>(null);
   const [registerPushDevice] = useState(() =>
     createPushDeviceRegistrar((input) => apiRegisterPushDevice(input)),
@@ -143,10 +151,25 @@ export function PushNotificationProvider({ children }: PropsWithChildren) {
     if (granted && user) {
       // Token registration is deliberately best-effort. A Firebase outage must
       // never block authentication or make the app unusable.
-      void registerCurrentToken(granted).catch(() => undefined);
+      void registerCurrentToken(granted)
+        .then(() => {
+          backendRegistrationState.current = "active";
+        })
+        .catch(() => undefined);
+    } else if (user && backendRegistrationState.current !== "inactive") {
+      // Permission can be revoked directly in Android/iOS Settings while the
+      // app is backgrounded. Keep the backend audience in sync when the user
+      // returns, without revoking the OS permission or affecting local state.
+      void getPushInstallationId()
+        .then(apiUnregisterPushDevice)
+        .then(() => {
+          registerPushDevice.invalidate(user.id);
+          backendRegistrationState.current = "inactive";
+        })
+        .catch(() => undefined);
     }
     return nextPermission;
-  }, [registerCurrentToken, user]);
+  }, [registerCurrentToken, registerPushDevice, user]);
 
   const handleResponse = useCallback(
     async (response: Notifications.NotificationResponse | null) => {
@@ -231,7 +254,11 @@ export function PushNotificationProvider({ children }: PropsWithChildren) {
     grantedPermission.current = granted;
     setPermission(permissionState(settings));
     if (granted && user) {
-      void registerCurrentToken(granted).catch(() => undefined);
+      void registerCurrentToken(granted)
+        .then(() => {
+          backendRegistrationState.current = "active";
+        })
+        .catch(() => undefined);
       void reconcileReminders().catch(() => undefined);
     }
     return Boolean(granted);

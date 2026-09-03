@@ -83,4 +83,28 @@ describe("push device registration", () => {
 
     expect(register).not.toHaveBeenCalled();
   });
+
+  it("registers again after the backend registration is invalidated", async () => {
+    const register = jest.fn().mockResolvedValue(undefined);
+    const registrar = createPushDeviceRegistrar(register);
+
+    await registrar("user-1", input);
+    registrar.invalidate("user-1");
+    await registrar("user-1", input);
+
+    expect(register).toHaveBeenCalledTimes(2);
+  });
+
+  it("clears remembered registrations when the signed-in account changes", async () => {
+    const register = jest.fn().mockResolvedValue(undefined);
+    const registrar = createPushDeviceRegistrar(register);
+
+    registrar.setCurrentAccount("user-1");
+    await registrar("user-1", input);
+    registrar.setCurrentAccount(undefined);
+    registrar.setCurrentAccount("user-1");
+    await registrar("user-1", input);
+
+    expect(register).toHaveBeenCalledTimes(2);
+  });
 });

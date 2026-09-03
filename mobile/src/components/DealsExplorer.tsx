@@ -1,17 +1,17 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import { useMemo, useState } from "react";
 import { FlatList, StyleSheet, View } from "react-native";
 
-import { apiListOfferCategories, apiListOffers, apiToggleSaveOffer } from "@/api/offers";
+import { apiListOfferCategories, apiListOffers } from "@/api/offers";
 import { queryKeys } from "@/api/queryKeys";
 import { OfferCard } from "@/components/OfferCard";
+import { SaveOfferFeedback } from "@/components/SaveOfferFeedback";
 import { AppText, Chip, SearchField } from "@/design-system/components";
 import { color, space } from "@/design-system/tokens";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
-import { useAuth } from "@/providers/AuthProvider";
-import { cancelSavedOfferReminder } from "@/services/localNotifications";
-import type { Offer, OfferSort } from "@/types/offer";
+import { useSaveOfferToggle } from "@/hooks/useSaveOfferToggle";
+import type { OfferSort } from "@/types/offer";
 
 const SORTS: { value: OfferSort; label: string }[] = [
   { value: "featured", label: "Featured" },
@@ -21,8 +21,7 @@ const SORTS: { value: OfferSort; label: string }[] = [
 
 export function DealsExplorer({ initialCategory }: { initialCategory?: string }) {
   const router = useRouter();
-  const queryClient = useQueryClient();
-  const { user } = useAuth();
+  const { feedback, toggleSave } = useSaveOfferToggle();
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState(initialCategory || "all");
   const [sort, setSort] = useState<OfferSort>("featured");
@@ -53,82 +52,84 @@ export function DealsExplorer({ initialCategory }: { initialCategory?: string })
     queryFn: () => apiListOffers(filters),
   });
 
-  const toggleSave = async (offer: Offer) => {
-    const result = await apiToggleSaveOffer(offer.id);
-    if (!result.saved && user) await cancelSavedOfferReminder(user.id, offer.id);
-    await queryClient.invalidateQueries({ queryKey: queryKeys.offers.all() });
-  };
-
   return (
-    <FlatList
-      style={styles.list}
-      data={offersQuery.data ?? []}
-      keyExtractor={(item) => item.id}
-      numColumns={1}
-      refreshing={offersQuery.isRefetching}
-      onRefresh={() => offersQuery.refetch()}
-      contentContainerStyle={styles.listContent}
-      renderItem={({ item }) => (
-        <View style={styles.gridItem}>
-          <OfferCard
-            offer={item}
-            onPress={() => router.push(`/offer/${item.id}`)}
-            onToggleSave={() => toggleSave(item)}
-          />
-        </View>
-      )}
-      ListHeaderComponent={
-        <View style={styles.filters}>
-          <SearchField
-            value={query}
-            onChangeText={setQuery}
-            placeholder="Search brands, offers…"
-            testID="offers-search-input"
-          />
-          <FlatList
-            horizontal
-            data={SORTS}
-            keyExtractor={(item) => item.value}
-            showsHorizontalScrollIndicator={false}
-            style={styles.chipRow}
-            renderItem={({ item: s }) => (
-              <View key={s.value} style={styles.chipGap}>
-                <Chip label={s.label} active={sort === s.value} onPress={() => setSort(s.value)} />
-              </View>
-            )}
-          />
-          <FlatList
-            horizontal
-            data={categories}
-            keyExtractor={(item) => item}
-            showsHorizontalScrollIndicator={false}
-            style={styles.chipRow}
-            renderItem={({ item: c }) => (
-              <View key={c} style={styles.chipGap}>
-                <Chip
-                  label={c === "all" ? "All" : c}
-                  active={category === c}
-                  onPress={() => setCategory(c)}
-                />
-              </View>
-            )}
-          />
-        </View>
-      }
-      ListEmptyComponent={
-        !offersQuery.isLoading ? (
-          <View style={styles.empty}>
-            <AppText variant="body" color={color.textSecondary}>
-              No offers match. Try clearing filters.
-            </AppText>
+    <View style={styles.container}>
+      <FlatList
+        style={styles.list}
+        data={offersQuery.data ?? []}
+        keyExtractor={(item) => item.id}
+        numColumns={1}
+        refreshing={offersQuery.isRefetching}
+        onRefresh={() => offersQuery.refetch()}
+        contentContainerStyle={styles.listContent}
+        renderItem={({ item }) => (
+          <View style={styles.gridItem}>
+            <OfferCard
+              offer={item}
+              onPress={() => router.push(`/offer/${item.id}`)}
+              onToggleSave={() => void toggleSave(item)}
+            />
           </View>
-        ) : null
-      }
-    />
+        )}
+        ListHeaderComponent={
+          <View style={styles.filters}>
+            <SearchField
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search brands, offers…"
+              testID="offers-search-input"
+            />
+            <FlatList
+              horizontal
+              data={SORTS}
+              keyExtractor={(item) => item.value}
+              showsHorizontalScrollIndicator={false}
+              style={styles.chipRow}
+              renderItem={({ item: s }) => (
+                <View key={s.value} style={styles.chipGap}>
+                  <Chip
+                    label={s.label}
+                    active={sort === s.value}
+                    onPress={() => setSort(s.value)}
+                  />
+                </View>
+              )}
+            />
+            <FlatList
+              horizontal
+              data={categories}
+              keyExtractor={(item) => item}
+              showsHorizontalScrollIndicator={false}
+              style={styles.chipRow}
+              renderItem={({ item: c }) => (
+                <View key={c} style={styles.chipGap}>
+                  <Chip
+                    label={c === "all" ? "All" : c}
+                    active={category === c}
+                    onPress={() => setCategory(c)}
+                  />
+                </View>
+              )}
+            />
+          </View>
+        }
+        ListEmptyComponent={
+          !offersQuery.isLoading ? (
+            <View style={styles.empty}>
+              <AppText variant="body" color={color.textSecondary}>
+                No offers match. Try clearing filters.
+              </AppText>
+            </View>
+          ) : null
+        }
+      />
+      <SaveOfferFeedback feedback={feedback} bottomOffset={72} />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  container: { flex: 1 },
   list: { flex: 1 },
   filters: { paddingVertical: space.md, gap: space.sm },
   chipRow: { flexGrow: 0 },

@@ -61,12 +61,42 @@ FCM_PROJECT_ID=savvy-campus-staging
 FCM_SERVICE_ACCOUNT_JSON={the complete service account JSON as one secret value}
 PUSH_WORKER_POLL_SECONDS=5
 PUSH_MAX_ATTEMPTS=5
+PUSH_TOKEN_STALE_DAYS=90
 ```
 
 For local-only development, leave `PUSH_ENABLED=false`. Admins can compose and
 preview drafts, but the backend refuses to queue a send. `FCM_SERVICE_ACCOUNT_FILE`
 is also supported for a local ignored credential file; production should use
 the hosting provider's encrypted secret storage.
+
+## Transactional notifications
+
+Backend-owned events are persisted as user-targeted transactional campaigns.
+Each event has a deterministic `event_key`; the database's unique partial
+index prevents retries or concurrent requests from creating duplicate pushes.
+The existing worker fans the event out to every active installation belonging
+to that user and tracks accepted, failed and opened counts per device.
+
+Connected events:
+
+- verification approved or rejected, including college-email auto-approval;
+- Savvy level reward unlocked;
+- coupon, level reward and Freshers café reward redeemed;
+- password reset requested and password successfully changed.
+
+Transactional pushes are additive. They are queued only when `PUSH_ENABLED`
+is true, and a push persistence/provider failure never rolls back the business
+event that already succeeded. Payloads include an event type, delivery ID and
+safe in-app route only. Codes, QR values, reset tokens, student IDs and review
+details are prohibited.
+
+The mobile app updates `last_seen_at` whenever it registers its current token.
+Permission revocation, logout, and token rotation delete the superseded live
+registration. The worker also permanently removes registrations older than
+`PUSH_TOKEN_STALE_DAYS`. If an uninstall cannot be observed beforehand, an FCM
+`UNREGISTERED` response deletes the token immediately after that attempted send.
+Delivery rows remain available for campaign auditing without retaining the live
+device registration.
 
 ## Production release check
 
@@ -84,8 +114,14 @@ the hosting provider's encrypted secret storage.
 
 ## iOS boundary
 
+Device registration and durable delivery rows retain `platform`, and every
+business event is provider-neutral. `_send_push_delivery` is the single sender
+boundary: it dispatches Android deliveries to FCM today and is where the APNs
+sender will be added later. No verification/reward/redemption hook will need to
+change.
+
 The Android-only config plugin intentionally does not add Apple's
-`aps-environment` entitlement. This preserves free-account local iOS signing.
-When iOS delivery is scheduled, add APNs credentials, an Apple Developer
-account, an iOS sender implementation, and the full Expo notifications iOS
-configuration as a separate release phase.
+`aps-environment` entitlement, preserving free-account local iOS signing. For
+iOS push delivery, add APNs credentials, a paid Apple Developer account, the
+full Expo notifications iOS configuration, an APNs implementation at the
+provider boundary, and then add `ios` to the enabled delivery platforms.

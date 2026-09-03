@@ -1,15 +1,17 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
 import { FlatList, Pressable, StyleSheet, View } from "react-native";
 
-import { apiListSavedOffers, apiToggleSaveOffer } from "@/api/offers";
+import { apiListSavedOffers } from "@/api/offers";
 import { queryKeys } from "@/api/queryKeys";
 import { OfferCard } from "@/components/OfferCard";
 import { formatReminderDate, OfferReminderSheet } from "@/components/OfferReminderSheet";
+import { SaveOfferFeedback } from "@/components/SaveOfferFeedback";
 import { AppText, Screen } from "@/design-system/components";
 import { color, radius, space } from "@/design-system/tokens";
+import { useSaveOfferToggle } from "@/hooks/useSaveOfferToggle";
 import { useAuth } from "@/providers/AuthProvider";
 import { usePushNotifications } from "@/providers/PushNotificationProvider";
 import {
@@ -22,8 +24,8 @@ import type { Offer } from "@/types/offer";
 
 export default function SavedOffersScreen() {
   const router = useRouter();
-  const queryClient = useQueryClient();
   const { user } = useAuth();
+  const { feedback, toggleSave } = useSaveOfferToggle();
   const { permission, enable, openSystemSettings } = usePushNotifications();
   const savedQuery = useQuery({ queryKey: queryKeys.offers.saved(), queryFn: apiListSavedOffers });
   const [selectedOffer, setSelectedOffer] = useState<Offer | null>(null);
@@ -44,12 +46,8 @@ export default function SavedOffersScreen() {
   );
 
   const removeSaved = async (offer: Offer) => {
-    const result = await apiToggleSaveOffer(offer.id);
-    if (!result.saved && user) {
-      await cancelSavedOfferReminder(user.id, offer.id);
-      await refreshLocalReminders();
-    }
-    await queryClient.invalidateQueries({ queryKey: queryKeys.offers.all() });
+    const result = await toggleSave(offer);
+    if (result && !result.saved) await refreshLocalReminders();
   };
 
   const scheduleReminder = async (date: Date) => {
@@ -182,6 +180,7 @@ export default function SavedOffersScreen() {
           }}
         />
       ) : null}
+      <SaveOfferFeedback feedback={feedback} />
     </Screen>
   );
 }

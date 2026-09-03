@@ -42,8 +42,16 @@ export function createPushDeviceRegistrar(registerPushDevice: RegisterPushDevice
   };
 
   register.setCurrentAccount = (accountId: string | undefined) => {
+    if (currentAccountId !== accountId) completed.clear();
     accountScopeEnabled = true;
     currentAccountId = accountId;
+  };
+
+  register.invalidate = (accountId: string) => {
+    const prefix = `${accountId}\u0000`;
+    for (const key of completed) {
+      if (key.startsWith(prefix)) completed.delete(key);
+    }
   };
 
   return register;

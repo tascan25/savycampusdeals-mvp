@@ -11,30 +11,23 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Optional
 
 import aiohttp
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2 import service_account
+from services.push_service import PushConfigurationError, PushSendError
 
 FCM_SCOPE = "https://www.googleapis.com/auth/firebase.messaging"
 
 
-class FcmConfigurationError(RuntimeError):
+class FcmConfigurationError(PushConfigurationError):
     """Raised when push was enabled without usable Firebase credentials."""
 
 
-@dataclass
-class FcmSendError(RuntimeError):
-    message: str
-    code: str = "unknown"
-    transient: bool = False
-    invalid_token: bool = False
-
-    def __str__(self) -> str:
-        return self.message
+class FcmSendError(PushSendError):
+    """Provider-specific subtype retained for focused FCM classification tests."""
 
 
 def build_fcm_payload(

@@ -60,7 +60,7 @@ export function toApiError(error: unknown): ApiError {
       return new ApiError({
         message:
           error.code === "ECONNABORTED"
-            ? "That took too long. Check your connection and try again."
+            ? "The Savvy server is taking longer than expected to wake up. Please try again."
             : "Couldn't reach the Savvy Campus server. Check your connection and try again.",
         status: null,
         requestId,

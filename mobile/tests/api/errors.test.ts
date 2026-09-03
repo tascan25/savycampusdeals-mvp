@@ -42,6 +42,13 @@ describe("toApiError", () => {
     expect(error.status).toBeNull();
   });
 
+  it("describes a timeout as a potentially waking server", () => {
+    const error = toApiError(new AxiosError("timeout", "ECONNABORTED"));
+
+    expect(error.message).toContain("server is taking longer than expected to wake up");
+    expect(error.isNetworkError).toBe(true);
+  });
+
   it("falls back to a generic message for a non-axios error", () => {
     const error = toApiError(new Error("boom"));
     expect(error.message).toBe("Something went wrong. Please try again.");

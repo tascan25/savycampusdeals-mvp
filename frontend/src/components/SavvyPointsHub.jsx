@@ -143,7 +143,7 @@ export default function SavvyPointsHub({ overview, loading }) {
     pending_referrals: pending = 0, level_rewards: levelRewards = [],
   } = overview;
   const nextName = tier.next_tier?.name;
-  const campusIconMinimum = overview.tiers.find((item) => item.key === "campus_icon")?.minimum ?? 8000;
+  const campusIconMinimum = overview.tiers.find((item) => item.key === "campus_icon")?.minimum ?? 12000;
   const rewardsByTier = Object.fromEntries(levelRewards.map((reward) => [reward.tier_key, reward]));
   const rewardTiers = overview.tiers.slice(1);
   const suggestedRewardTier = rewardTiers.slice().reverse().find((item) => rewardsByTier[item.key]?.status === "active")

@@ -101,20 +101,20 @@ class RewardsCollection:
 
 
 def test_tier_progress_uses_lifetime_points():
-    tier = server.savvy_tier(1250)
+    tier = server.savvy_tier(2500)
     assert tier["name"] == "Deal Hunter"
     assert tier["next_tier"]["name"] == "Savvy Insider"
-    assert tier["points_to_next"] == 1750
-    assert tier["progress_percent"] == 12.5
+    assert tier["points_to_next"] == 2500
+    assert tier["progress_percent"] == 16.7
 
 
 def test_tier_boundaries_match_current_reward_journey():
-    assert server.savvy_tier(999)["name"] == "Campus Starter"
-    assert server.savvy_tier(1000)["name"] == "Deal Hunter"
-    assert server.savvy_tier(2999)["name"] == "Deal Hunter"
-    assert server.savvy_tier(3000)["name"] == "Savvy Insider"
-    assert server.savvy_tier(7999)["name"] == "Savvy Insider"
-    assert server.savvy_tier(8000)["name"] == "Campus Icon"
+    assert server.savvy_tier(1999)["name"] == "Campus Starter"
+    assert server.savvy_tier(2000)["name"] == "Deal Hunter"
+    assert server.savvy_tier(4999)["name"] == "Deal Hunter"
+    assert server.savvy_tier(5000)["name"] == "Savvy Insider"
+    assert server.savvy_tier(11999)["name"] == "Savvy Insider"
+    assert server.savvy_tier(12000)["name"] == "Campus Icon"
 
 
 def test_award_is_idempotent(monkeypatch):
@@ -218,9 +218,9 @@ def test_level_rewards_are_issued_once_with_30_day_qr_and_email(monkeypatch):
                 "email": "icon@example.com",
                 "name": "Reward Student",
                 "verification_status": "approved",
-                "savvy_points_balance": 3100,
-                "savvy_points_lifetime": 3100,
-                "reward_points": 3100,
+                "savvy_points_balance": 5100,
+                "savvy_points_lifetime": 5100,
+                "reward_points": 5100,
             }
         ]
     )

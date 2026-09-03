@@ -13,6 +13,7 @@ type MobileTokenResponse = {
 export type AuthResponse = { user: User } & MobileTokenResponse;
 
 const platform = Platform.OS === "ios" || Platform.OS === "android" ? Platform.OS : undefined;
+const COLD_START_TIMEOUT_MS = 150_000;
 
 export async function apiRegister(input: {
   name: string;
@@ -29,14 +30,26 @@ export async function apiRegister(input: {
 }
 
 export async function apiLogin(input: { email: string; password: string }): Promise<AuthResponse> {
-  const { data } = await apiClient.post("/auth/mobile/login", { ...input, platform });
+  const { data } = await apiClient.post(
+    "/auth/mobile/login",
+    { ...input, platform },
+    {
+      timeout: COLD_START_TIMEOUT_MS,
+    },
+  );
   return data;
 }
 
 export async function apiAccountExists(email: string): Promise<boolean> {
-  const { data } = await apiClient.post<{ exists: boolean }>("/auth/mobile/account-exists", {
-    email,
-  });
+  const { data } = await apiClient.post<{ exists: boolean }>(
+    "/auth/mobile/account-exists",
+    {
+      email,
+    },
+    {
+      timeout: COLD_START_TIMEOUT_MS,
+    },
+  );
   return data.exists;
 }
 
@@ -58,7 +71,7 @@ export async function apiLogoutAll(): Promise<{ revoked_count: number }> {
 }
 
 export async function apiMe(): Promise<User> {
-  const { data } = await apiClient.get("/auth/me");
+  const { data } = await apiClient.get("/auth/me", { timeout: COLD_START_TIMEOUT_MS });
   return data;
 }
 

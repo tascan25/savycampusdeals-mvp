@@ -4,7 +4,14 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Link, useRouter } from "expo-router";
 import { useState } from "react";
 import { Controller, useForm } from "react-hook-form";
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from "react-native";
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  View,
+} from "react-native";
 
 import { apiAccountExists } from "@/api/auth";
 import { toApiError } from "@/api/errors";
@@ -21,6 +28,7 @@ import { forgotPasswordSchema, type ForgotPasswordFormValues } from "@/validatio
 export default function LoginScreen() {
   const router = useRouter();
   const [lookupError, setLookupError] = useState<string | null>(null);
+  const [serverWaking, setServerWaking] = useState(false);
   const {
     control,
     handleSubmit,
@@ -32,7 +40,9 @@ export default function LoginScreen() {
 
   const onContinue = handleSubmit(async ({ email }) => {
     setLookupError(null);
+    setServerWaking(false);
     const normalizedEmail = email.trim().toLowerCase();
+    const wakingTimer = setTimeout(() => setServerWaking(true), 8_000);
     try {
       const exists = await apiAccountExists(normalizedEmail);
       if (!exists) {
@@ -42,6 +52,9 @@ export default function LoginScreen() {
       router.push({ pathname: "/(auth)/login-password", params: { email: normalizedEmail } });
     } catch (error) {
       setLookupError(toApiError(error).message);
+    } finally {
+      clearTimeout(wakingTimer);
+      setServerWaking(false);
     }
   });
 
@@ -118,6 +131,20 @@ export default function LoginScreen() {
                 <AppText variant="small" color="#FCA5A5" style={styles.lookupErrorText}>
                   {lookupError}
                 </AppText>
+              </View>
+            ) : null}
+
+            {serverWaking ? (
+              <View style={styles.wakingNotice} accessibilityLiveRegion="polite">
+                <ActivityIndicator size="small" color="#C4B5FD" />
+                <View style={styles.wakingCopy}>
+                  <AppText variant="small" color="#DDD6FE">
+                    Savvy&apos;s server is waking up
+                  </AppText>
+                  <AppText variant="caption" color={color.textTertiary}>
+                    This can take a minute on the first request. Keep this screen open.
+                  </AppText>
+                </View>
               </View>
             ) : null}
 
@@ -215,6 +242,17 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(239,68,68,0.09)",
   },
   lookupErrorText: { flex: 1 },
+  wakingNotice: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.sm,
+    padding: space.md,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(167,139,250,0.2)",
+    backgroundColor: "rgba(124,58,237,0.09)",
+  },
+  wakingCopy: { flex: 1, gap: 2 },
   footerRow: {
     minHeight: 44,
     flexDirection: "row",

@@ -22,8 +22,10 @@ export function QueryProvider({ children }: PropsWithChildren) {
               if (apiError.status && apiError.status >= 400 && apiError.status < 500) {
                 return false;
               }
+              if (apiError.isNetworkError) return failureCount < 5;
               return failureCount < 2;
             },
+            retryDelay: (attempt) => Math.min(2_000 * 2 ** attempt, 15_000),
             staleTime: 30_000,
           },
           mutations: {

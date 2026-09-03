@@ -2,9 +2,9 @@ import { pickDefaultRewardTier } from "@/components/LevelRewardsSection";
 import type { LevelReward, SavvyTier } from "@/types/rewards";
 
 const rewardTiers: SavvyTier[] = [
-  { key: "deal_hunter", name: "Deal Hunter", minimum: 1000, benefit: "", reward: "" },
-  { key: "savvy_insider", name: "Savvy Insider", minimum: 3000, benefit: "", reward: "" },
-  { key: "campus_icon", name: "Campus Icon", minimum: 8000, benefit: "", reward: "" },
+  { key: "deal_hunter", name: "Deal Hunter", minimum: 2000, benefit: "", reward: "" },
+  { key: "savvy_insider", name: "Savvy Insider", minimum: 5000, benefit: "", reward: "" },
+  { key: "campus_icon", name: "Campus Icon", minimum: 12000, benefit: "", reward: "" },
 ];
 
 function reward(overrides: Partial<LevelReward>): LevelReward {
@@ -30,15 +30,15 @@ describe("pickDefaultRewardTier", () => {
       deal_hunter: reward({ tier_key: "deal_hunter", status: "redeemed" }),
       savvy_insider: reward({ tier_key: "savvy_insider", status: "active" }),
     };
-    expect(pickDefaultRewardTier(rewardTiers, rewardsByKey, 3500)).toBe("savvy_insider");
+    expect(pickDefaultRewardTier(rewardTiers, rewardsByKey, 5500)).toBe("savvy_insider");
   });
 
   it("falls back to the next locked tier when nothing is active", () => {
     const rewardsByKey = { deal_hunter: reward({ tier_key: "deal_hunter", status: "redeemed" }) };
-    expect(pickDefaultRewardTier(rewardTiers, rewardsByKey, 1500)).toBe("savvy_insider");
+    expect(pickDefaultRewardTier(rewardTiers, rewardsByKey, 2500)).toBe("savvy_insider");
   });
 
   it("falls back to the last tier once every tier is reached", () => {
-    expect(pickDefaultRewardTier(rewardTiers, {}, 9000)).toBe("campus_icon");
+    expect(pickDefaultRewardTier(rewardTiers, {}, 13000)).toBe("campus_icon");
   });
 });

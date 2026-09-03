@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -13,15 +13,16 @@ import {
   View,
 } from "react-native";
 
-import { apiListOfferCategories, apiListOffers, apiToggleSaveOffer } from "@/api/offers";
+import { apiListOfferCategories, apiListOffers } from "@/api/offers";
 import { apiListOutlets } from "@/api/outlets";
 import { queryKeys } from "@/api/queryKeys";
 import { OfferCard } from "@/components/OfferCard";
+import { SaveOfferFeedback } from "@/components/SaveOfferFeedback";
 import { StudentAvatar } from "@/components/StudentAvatar";
 import { AppText, Screen } from "@/design-system/components";
 import { color, radius, space } from "@/design-system/tokens";
+import { useSaveOfferToggle } from "@/hooks/useSaveOfferToggle";
 import { useAuth } from "@/providers/AuthProvider";
-import { cancelSavedOfferReminder } from "@/services/localNotifications";
 import { getCurrentCoordsIfGranted, type Coords } from "@/services/location";
 import type { Offer } from "@/types/offer";
 import type { Outlet } from "@/types/outlet";
@@ -217,7 +218,7 @@ function OutletTile({
 export default function HomeTab() {
   const { user } = useAuth();
   const router = useRouter();
-  const queryClient = useQueryClient();
+  const { feedback, toggleSave } = useSaveOfferToggle();
   const spotlightRef = useRef<FlatList<Offer>>(null);
   const outletRef = useRef<FlatList<Outlet>>(null);
   const [spotlightScrollX] = useState(() => new Animated.Value(0));
@@ -248,12 +249,6 @@ export default function HomeTab() {
     queryKey: queryKeys.offers.categories(),
     queryFn: apiListOfferCategories,
   });
-
-  const toggleSave = async (offer: Offer) => {
-    const result = await apiToggleSaveOffer(offer.id);
-    if (!result.saved && user) await cancelSavedOfferReminder(user.id, offer.id);
-    await queryClient.invalidateQueries({ queryKey: queryKeys.offers.all() });
-  };
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 60_000);
@@ -786,6 +781,7 @@ export default function HomeTab() {
           </>
         }
       />
+      <SaveOfferFeedback feedback={feedback} bottomOffset={72} />
     </Screen>
   );
 }

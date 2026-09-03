@@ -10,6 +10,8 @@ export const secureStorageKeys = {
   accessToken: "scd_access_token",
   refreshToken: "scd_refresh_token",
   accessTokenExpiresAt: "scd_access_token_expires_at",
+  /** Cached identity keeps navigation stable during temporary API outages. */
+  cachedUser: "scd_cached_user_v1",
   /** A device-level preference, not session data — deliberately excluded
    * from `clearSession()` so enabling app-lock survives logout/login. */
   appLockEnabled: "scd_app_lock_enabled",
@@ -21,6 +23,7 @@ const sessionKeys = [
   secureStorageKeys.accessToken,
   secureStorageKeys.refreshToken,
   secureStorageKeys.accessTokenExpiresAt,
+  secureStorageKeys.cachedUser,
 ] as const;
 
 export type SecureStorageKey = (typeof secureStorageKeys)[keyof typeof secureStorageKeys];

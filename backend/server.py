@@ -53,7 +53,8 @@ from services.cloudinary_service import (
     upload_verification_image,
     validate_verification_image,
 )
-from services.fcm_service import FcmConfigurationError, FcmSendError, FcmSender
+from services.fcm_service import FcmSender
+from services.push_service import PushConfigurationError, PushSendError
 from utils.json_loader import load_data
 
 # -----------------------------
@@ -85,6 +86,9 @@ PUSH_WORKER_POLL_SECONDS = max(
     1.0, min(60.0, float(os.environ.get("PUSH_WORKER_POLL_SECONDS", "5")))
 )
 PUSH_MAX_ATTEMPTS = max(1, min(10, int(os.environ.get("PUSH_MAX_ATTEMPTS", "5"))))
+PUSH_TOKEN_STALE_DAYS = max(
+    30, min(365, int(os.environ.get("PUSH_TOKEN_STALE_DAYS", "90")))
+)
 BRAND_OFFER_DISCLAIMER = (
     "SavvyCampusDeals helps students discover this publicly available offer. "
     "Eligibility, verification, availability and fulfilment are managed by the "
@@ -219,21 +223,21 @@ SAVVY_POINT_TIERS = [
     {
         "key": "deal_hunter",
         "name": "Deal Hunter",
-        "minimum": 1000,
+        "minimum": 2000,
         "benefit": "Your first real level reward is ready to enjoy.",
         "reward": "One free cold coffee, iced tea, lemonade, or similar drink.",
     },
     {
         "key": "savvy_insider",
         "name": "Savvy Insider",
-        "minimum": 3000,
+        "minimum": 5000,
         "benefit": "A bigger campus treat for a true Savvy regular.",
         "reward": "One free drink, one free pizza, and a voucher worth up to ₹150.",
     },
     {
         "key": "campus_icon",
         "name": "Campus Icon",
-        "minimum": 8000,
+        "minimum": 12000,
         "benefit": "You've unlocked the biggest Savvy milestone reward.",
         "reward": "One laptop bag, one water bottle, and a voucher worth up to ₹300.",
     },
@@ -410,6 +414,16 @@ async def ensure_level_rewards(user_id: ObjectId) -> list[dict]:
             await db.savvy_level_rewards.insert_one(reward)
         except DuplicateKeyError:
             continue
+        await queue_transactional_push(
+            user_id=user_id,
+            event_key=f"level_reward_unlocked:{reward['_id']}",
+            event_type="level_reward_unlocked",
+            title="New Savvy reward unlocked ✨",
+            message=f"You reached {tier['name']}. Your new reward is ready to view.",
+            cta_url="/rewards",
+            channel="reminders",
+            priority="high",
+        )
         send_email(
             user["email"],
             f"{tier['name']} unlocked — your Savvy reward is here ✨",
@@ -2286,13 +2300,12 @@ async def mobile_logout(body: MobileLogoutIn):
         {"$set": {"revoked": True, "revoked_at": now, "revoked_reason": "logout"}},
     )
     if session and body.installation_id:
-        await db.device_tokens.update_many(
+        await db.device_tokens.delete_many(
             {
                 "user_id": session["user_id"],
                 "installation_id": body.installation_id,
                 "environment": PUSH_ENV,
-            },
-            {"$set": {"active": False, "disabled_at": now, "disabled_reason": "logout"}},
+            }
         )
     return {"ok": True}
 
@@ -2335,8 +2348,10 @@ async def forgot(body: ForgotIn):
     # always success (no user enumeration)
     if user:
         token = secrets.token_urlsafe(24)
+        reset_id = ObjectId()
         await db.password_resets.insert_one(
             {
+                "_id": reset_id,
                 "user_id": user["_id"],
                 "token": token,
                 "expires_at": datetime.now(timezone.utc) + timedelta(hours=1),
@@ -2443,6 +2458,16 @@ async def forgot(body: ForgotIn):
             </html>
             """,
         )
+        await queue_transactional_push(
+            user_id=user["_id"],
+            event_key=f"password_reset_requested:{reset_id}",
+            event_type="password_reset_requested",
+            title="Password reset requested",
+            message="A password reset was requested for your Savvy account. Review this if it wasn't you.",
+            cta_url="/profile",
+            channel="account",
+            priority="high",
+        )
     return {"ok": True}
 
 
@@ -2457,6 +2482,16 @@ async def reset(body: ResetIn):
         {"$set": {"password_hash": hash_password(body.password)}},
     )
     await db.password_resets.update_one({"_id": doc["_id"]}, {"$set": {"used": True}})
+    await queue_transactional_push(
+        user_id=doc["user_id"],
+        event_key=f"password_reset_completed:{doc['_id']}",
+        event_type="password_reset_completed",
+        title="Your Savvy password was changed",
+        message="If you didn't make this change, contact Savvy support immediately.",
+        cta_url="/profile",
+        channel="account",
+        priority="high",
+    )
     return {"ok": True}
 
 
@@ -2858,6 +2893,17 @@ async def submit_verification(
 
     fresh = await db.users.find_one({"_id": user["_id"]})
     freshers_reward = await unlock_freshers_reward(fresh) if trusted_email else None
+    if trusted_email:
+        await queue_transactional_push(
+            user_id=user["_id"],
+            event_key=f"verification_reviewed:{doc['_id']}:approved",
+            event_type="verification_approved",
+            title="Student verification approved 🎉",
+            message="Your student account is verified. You can now claim Savvy deals.",
+            cta_url="/profile",
+            channel="account",
+            priority="high",
+        )
     return {
         "ok": True,
         "verification_method": "college_email" if trusted_email else "document_review",
@@ -3575,6 +3621,24 @@ async def review_verification(
                     "/verify",
                 ),
             )
+        await queue_transactional_push(
+            user_id=student["_id"],
+            event_key=f"verification_reviewed:{verification_oid}:{body.status}",
+            event_type=f"verification_{body.status}",
+            title=(
+                "Student verification approved 🎉"
+                if body.status == "approved"
+                else "Verification needs attention"
+            ),
+            message=(
+                "Your student account is verified. You can now claim Savvy deals."
+                if body.status == "approved"
+                else "Open Savvy to review your verification status and submit again."
+            ),
+            cta_url="/profile" if body.status == "approved" else "/verify",
+            channel="account",
+            priority="high",
+        )
     fresh = await db.users.find_one({"_id": student["_id"]})
     return {"ok": True, "user": serialize_user(fresh)}
 
@@ -3631,7 +3695,12 @@ def serialize_admin_verification(doc: dict, include_images: bool = False) -> dic
 PUSH_CAMPAIGN_AUDIENCES = {"everyone", "students", "partners"}
 PUSH_CHANNELS = {"deals", "reminders", "account"}
 PUSH_EDITABLE_STATUSES = {"draft", "cancelled"}
+# Device rows and deliveries already retain their platform. Android is the
+# production sender today; adding APNs later only requires adding "ios" here
+# and implementing the provider branch in `_send_push_delivery`.
+PUSH_DELIVERY_PLATFORMS = {"android"}
 _push_worker_task: Optional[asyncio.Task] = None
+_next_push_token_cleanup_at: Optional[datetime] = None
 _fcm_sender = FcmSender.from_environment()
 
 
@@ -3698,21 +3767,50 @@ def _push_audience_user_query(audience: str) -> dict:
     raise HTTPException(400, "Invalid notification audience")
 
 
-async def _eligible_push_devices(audience: str) -> list[dict]:
-    user_ids = await db.users.distinct("_id", _push_audience_user_query(audience))
+async def _eligible_push_devices(
+    audience: Optional[str] = None, *, user_ids: Optional[list[ObjectId]] = None
+) -> list[dict]:
+    if user_ids is None:
+        if audience is None:
+            raise ValueError("A push audience or target user is required")
+        user_ids = await db.users.distinct("_id", _push_audience_user_query(audience))
     if not user_ids:
         return []
     devices = await db.device_tokens.find(
         {
             "user_id": {"$in": user_ids},
             "environment": PUSH_ENV,
-            "platform": "android",
+            "platform": {"$in": list(PUSH_DELIVERY_PLATFORMS)},
             "active": True,
+            "last_seen_at": {
+                "$gte": datetime.now(timezone.utc)
+                - timedelta(days=PUSH_TOKEN_STALE_DAYS)
+            },
         }
     ).to_list(None)
     # A token is globally unique, but keeping this defensive de-duplication here
     # also protects audience counts while old records are being migrated.
     return list({device["token"]: device for device in devices}.values())
+
+
+async def _prune_stale_push_devices(*, force: bool = False) -> int:
+    """Delete stale registrations without relying only on provider failures."""
+    global _next_push_token_cleanup_at
+    now = datetime.now(timezone.utc)
+    if not force and _next_push_token_cleanup_at and now < _next_push_token_cleanup_at:
+        return 0
+    cutoff = now - timedelta(days=PUSH_TOKEN_STALE_DAYS)
+    result = await db.device_tokens.delete_many(
+        {
+            "environment": PUSH_ENV,
+            "$or": [
+                {"last_seen_at": {"$lt": cutoff}},
+                {"last_seen_at": {"$exists": False}},
+            ],
+        }
+    )
+    _next_push_token_cleanup_at = now + timedelta(days=1)
+    return int(result.deleted_count)
 
 
 async def _push_audience_counts(audience: str) -> dict:
@@ -3725,6 +3823,88 @@ async def _push_audience_counts(audience: str) -> dict:
     }
 
 
+async def queue_transactional_push(
+    *,
+    user_id: ObjectId,
+    event_key: str,
+    event_type: str,
+    title: str,
+    message: str,
+    cta_url: str,
+    channel: str = "account",
+    priority: str = "high",
+) -> Optional[ObjectId]:
+    """Persist one idempotent user-targeted push without blocking its event.
+
+    The business mutation has already committed when this is called. Push must
+    therefore remain additive: a database/provider problem is logged but never
+    turns a successful verification, redemption, or security action into a
+    misleading API failure.
+    """
+    if not PUSH_ENABLED:
+        return None
+    if channel not in PUSH_CHANNELS:
+        raise ValueError("Invalid transactional push channel")
+    if priority not in {"normal", "high"}:
+        raise ValueError("Invalid transactional push priority")
+    if not cta_url.startswith("/"):
+        raise ValueError("Transactional push destinations must be app paths")
+
+    now = datetime.now(timezone.utc)
+    campaign_id = ObjectId()
+    try:
+        result = await db.push_campaigns.update_one(
+            {
+                "kind": "transactional",
+                "environment": PUSH_ENV,
+                "event_key": event_key,
+            },
+            {
+                "$setOnInsert": {
+                    "_id": campaign_id,
+                    "kind": "transactional",
+                    "environment": PUSH_ENV,
+                    "event_key": event_key,
+                    "event_type": event_type,
+                    "target_user_id": user_id,
+                    "title": title,
+                    "message": message,
+                    "channel": channel,
+                    "priority": priority,
+                    "cta_url": cta_url,
+                    "image_url": "",
+                    "scheduled_at": None,
+                    "status": "preparing",
+                    "queued_at": now,
+                    "created_at": now,
+                    "updated_at": now,
+                    "stats": {
+                        "devices": 0,
+                        "pending": 0,
+                        "accepted": 0,
+                        "failed": 0,
+                        "opened": 0,
+                    },
+                }
+            },
+            upsert=True,
+        )
+        if result.upserted_id is not None:
+            return campaign_id
+        existing = await db.push_campaigns.find_one(
+            {
+                "kind": "transactional",
+                "environment": PUSH_ENV,
+                "event_key": event_key,
+            },
+            {"_id": 1},
+        )
+        return existing.get("_id") if existing else None
+    except Exception:
+        logger.exception("Could not queue transactional push event %s", event_key)
+        return None
+
+
 async def _materialize_push_campaign(campaign_id: ObjectId) -> None:
     campaign = await db.push_campaigns.find_one({"_id": campaign_id})
     if not campaign or campaign.get("status") not in {"preparing", "scheduled"}:
@@ -3734,7 +3914,11 @@ async def _materialize_push_campaign(campaign_id: ObjectId) -> None:
         {"_id": campaign_id, "status": {"$in": ["preparing", "scheduled"]}},
         {"$set": {"status": "preparing", "updated_at": now}},
     )
-    devices = await _eligible_push_devices(campaign["audience"])
+    target_user_id = campaign.get("target_user_id")
+    devices = await _eligible_push_devices(
+        campaign.get("audience"),
+        user_ids=[target_user_id] if target_user_id else None,
+    )
     if devices:
         operations = [
             UpdateOne(
@@ -3797,20 +3981,7 @@ async def _finish_push_delivery(delivery: dict) -> None:
         )
         return
     try:
-        provider_message_id = await _fcm_sender.send(
-            token=delivery["token"],
-            title=campaign["title"],
-            body=campaign["message"],
-            channel_id=campaign.get("channel", "deals"),
-            priority=campaign.get("priority", "normal"),
-            image_url=campaign.get("image_url", ""),
-            data={
-                "kind": "push_campaign",
-                "campaign_id": str(campaign["_id"]),
-                "delivery_id": str(delivery["_id"]),
-                "route": campaign.get("cta_url", ""),
-            },
-        )
+        provider_message_id = await _send_push_delivery(delivery, campaign)
         now = datetime.now(timezone.utc)
         await db.push_deliveries.update_one(
             {"_id": delivery["_id"]},
@@ -3828,7 +3999,7 @@ async def _finish_push_delivery(delivery: dict) -> None:
             {"_id": campaign["_id"]},
             {"$inc": {"stats.pending": -1, "stats.accepted": 1}, "$set": {"updated_at": now}},
         )
-    except FcmConfigurationError as exc:
+    except PushConfigurationError as exc:
         logger.error("Push configuration error: %s", exc)
         await db.push_deliveries.update_one(
             {"_id": delivery["_id"]},
@@ -3841,7 +4012,7 @@ async def _finish_push_delivery(delivery: dict) -> None:
             },
         )
         return
-    except FcmSendError as exc:
+    except PushSendError as exc:
         attempts = int(delivery.get("attempts", 0)) + 1
         retry = exc.transient and attempts < PUSH_MAX_ATTEMPTS
         now = datetime.now(timezone.utc)
@@ -3862,16 +4033,10 @@ async def _finish_push_delivery(delivery: dict) -> None:
             {"_id": delivery["_id"]}, {"$set": delivery_updates}
         )
         if exc.invalid_token:
-            await db.device_tokens.update_many(
-                {"token": delivery["token"]},
-                {
-                    "$set": {
-                        "active": False,
-                        "disabled_at": now,
-                        "disabled_reason": exc.code,
-                    }
-                },
-            )
+            # FCM has confirmed that this app installation can no longer be
+            # reached. Keep the immutable delivery row for campaign auditing,
+            # but remove the live registration as Firebase recommends.
+            await db.device_tokens.delete_many({"token": delivery["token"]})
         if not retry:
             await db.push_campaigns.update_one(
                 {"_id": campaign["_id"]},
@@ -3892,9 +4057,37 @@ async def _finish_push_delivery(delivery: dict) -> None:
         )
 
 
+async def _send_push_delivery(delivery: dict, campaign: dict) -> str:
+    """Dispatch at the sole provider boundary; APNs will be added here."""
+    platform = delivery.get("platform", "android")
+    if platform != "android":
+        raise PushSendError(
+            message=f"Push provider is not configured for {platform}",
+            code="provider_not_configured",
+            transient=False,
+        )
+    return await _fcm_sender.send(
+        token=delivery["token"],
+        title=campaign["title"],
+        body=campaign["message"],
+        channel_id=campaign.get("channel", "deals"),
+        priority=campaign.get("priority", "normal"),
+        image_url=campaign.get("image_url", ""),
+        data={
+            "kind": campaign.get("kind", "push_campaign"),
+            "campaign_id": str(campaign["_id"]),
+            "delivery_id": str(delivery["_id"]),
+            "route": campaign.get("cta_url", ""),
+            "event_type": campaign.get("event_type", ""),
+            "play_sound": "true",
+        },
+    )
+
+
 async def _push_job_worker() -> None:
     while True:
         try:
+            await _prune_stale_push_devices()
             now = datetime.now(timezone.utc)
             due_campaign = await db.push_campaigns.find_one_and_update(
                 {
@@ -4367,6 +4560,25 @@ async def _review_pending_verification(
             ),
         )
 
+    await queue_transactional_push(
+        user_id=student["_id"],
+        event_key=f"verification_reviewed:{verification_oid}:{status}",
+        event_type=f"verification_{status}",
+        title=(
+            "Student verification approved 🎉"
+            if status == "approved"
+            else "Verification needs attention"
+        ),
+        message=(
+            "Your student account is verified. You can now claim Savvy deals."
+            if status == "approved"
+            else "Open Savvy to review your verification status and submit again."
+        ),
+        cta_url="/profile" if status == "approved" else "/verify",
+        channel="account",
+        priority="high",
+    )
+
     fresh = await db.users.find_one({"_id": student["_id"]})
     return {
         "ok": True,
@@ -4434,23 +4646,15 @@ async def register_push_device(body: PushDeviceIn, user=Depends(get_current_user
     if user.get("role") not in {"student", "outlet_partner"}:
         raise HTTPException(403, "Push notifications are not available for this account")
     now = datetime.now(timezone.utc)
-    # One installation can rotate tokens. Disable its old token before the
-    # globally unique token is reassigned/upserted to the current account.
-    await db.device_tokens.update_many(
+    # One installation can rotate tokens. Remove its superseded registration
+    # before the globally unique current token is reassigned/upserted.
+    await db.device_tokens.delete_many(
         {
             "user_id": user["_id"],
             "installation_id": body.installation_id,
             "environment": PUSH_ENV,
             "token": {"$ne": body.token},
-            "active": True,
-        },
-        {
-            "$set": {
-                "active": False,
-                "disabled_at": now,
-                "disabled_reason": "token_rotated",
-            }
-        },
+        }
     )
     await db.device_tokens.update_one(
         {"token": body.token},
@@ -4478,20 +4682,12 @@ async def register_push_device(body: PushDeviceIn, user=Depends(get_current_user
 async def unregister_push_device(installation_id: str, user=Depends(get_current_user)):
     if not 8 <= len(installation_id) <= 128:
         raise HTTPException(400, "Invalid installation identifier")
-    now = datetime.now(timezone.utc)
-    await db.device_tokens.update_many(
+    await db.device_tokens.delete_many(
         {
             "user_id": user["_id"],
             "installation_id": installation_id,
             "environment": PUSH_ENV,
-        },
-        {
-            "$set": {
-                "active": False,
-                "disabled_at": now,
-                "disabled_reason": "unregistered",
-            }
-        },
+        }
     )
     return {"ok": True}
 
@@ -4526,7 +4722,9 @@ async def admin_push_audience_count(
 
 @api.get("/admin/push-campaigns")
 async def admin_push_campaigns(admin=Depends(get_admin_user)):
-    campaigns = await db.push_campaigns.find({}).sort("created_at", -1).to_list(200)
+    campaigns = await db.push_campaigns.find(
+        {"kind": {"$ne": "transactional"}}
+    ).sort("created_at", -1).to_list(200)
     return {
         "items": [serialize_push_campaign(campaign) for campaign in campaigns],
         "push_enabled": PUSH_ENABLED,
@@ -8353,6 +8551,16 @@ async def scan_redeem(body: ScanIn, scanner=Depends(get_scanner_user)):
             raise HTTPException(409, "Freshers café coupon already redeemed")
         campaign = await get_freshers_campaign()
         await db.freshers_scan_events.insert_one({"campaign_id": campaign["_id"], "participant_id": participant["_id"], "staff_id": scanner["_id"], "kind": "cafe", "result": "redeemed", "created_at": now})
+        await queue_transactional_push(
+            user_id=participant["user_id"],
+            event_key=f"freshers_reward_redeemed:{participant['_id']}",
+            event_type="freshers_reward_redeemed",
+            title="Freshers reward redeemed",
+            message="Your Freshers café reward was redeemed successfully.",
+            cta_url="/rewards",
+            channel="account",
+            priority="high",
+        )
         return {"ok": True, "kind": "freshers_cafe", "code": participant["cafe_code"], "student_name": user.get("name", ""), "redeemed_at": now.isoformat(), "approved_by": scanner.get("name", "")}
     if parsed["kind"] == "level_reward":
         reward = await db.savvy_level_rewards.find_one({"code": parsed.get("code")})
@@ -8383,6 +8591,16 @@ async def scan_redeem(body: ScanIn, scanner=Depends(get_scanner_user)):
         )
         if not redeemed.matched_count:
             raise HTTPException(409, "Level reward already redeemed")
+        await queue_transactional_push(
+            user_id=reward["user_id"],
+            event_key=f"level_reward_redeemed:{reward['_id']}",
+            event_type="level_reward_redeemed",
+            title="Savvy reward redeemed",
+            message="Your Savvy level reward was redeemed successfully.",
+            cta_url="/rewards",
+            channel="account",
+            priority="high",
+        )
         return {
             "ok": True,
             "kind": "level_reward",
@@ -8445,6 +8663,16 @@ async def scan_redeem(body: ScanIn, scanner=Depends(get_scanner_user)):
                 "$set": {"savvy_points_awarded": SAVVY_REDEMPTION_POINTS},
                 "$unset": {"savvy_points_award_pending": ""},
             },
+        )
+        await queue_transactional_push(
+            user_id=c["user_id"],
+            event_key=f"coupon_redeemed:{c['_id']}",
+            event_type="coupon_redeemed",
+            title="Coupon redeemed successfully",
+            message=f"Your {(offer or {}).get('brand', 'partner')} deal was redeemed. Your Savvy Points are updated.",
+            cta_url="/wallet",
+            channel="account",
+            priority="high",
         )
         return {
             "ok": True,
@@ -8566,6 +8794,16 @@ async def scan_redeem(body: ScanIn, scanner=Depends(get_scanner_user)):
             "$set": {"savvy_points_awarded": SAVVY_REDEMPTION_POINTS},
             "$unset": {"savvy_points_award_pending": ""},
         },
+    )
+    await queue_transactional_push(
+        user_id=c["user_id"],
+        event_key=f"coupon_redeemed:{c['_id']}",
+        event_type="coupon_redeemed",
+        title="Coupon redeemed successfully",
+        message=f"Your {(offer or {}).get('brand', 'partner')} deal was redeemed. Your Savvy Points are updated.",
+        cta_url="/wallet",
+        channel="account",
+        priority="high",
     )
     return {
         "ok": True,
@@ -9265,6 +9503,11 @@ async def on_startup():
             [("user_id", 1), ("installation_id", 1), ("environment", 1)]
         )
         await db.push_campaigns.create_index([("status", 1), ("scheduled_at", 1)])
+        await db.push_campaigns.create_index(
+            [("environment", 1), ("event_key", 1)],
+            unique=True,
+            partialFilterExpression={"event_key": {"$type": "string"}},
+        )
         await db.push_deliveries.create_index(
             [("campaign_id", 1), ("token", 1)], unique=True
         )

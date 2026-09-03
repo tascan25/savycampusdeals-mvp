@@ -1,4 +1,4 @@
-import { create } from "axios";
+import { create, isAxiosError } from "axios";
 
 import { env } from "@/config/env";
 import {
@@ -7,6 +7,7 @@ import {
   secureStorageKeys,
   setSecureValue,
 } from "@/storage/secureStore";
+import type { User } from "@/types/user";
 
 /**
  * Session storage + the single-flight refresh lock. Tokens live only in
@@ -78,6 +79,22 @@ export async function hasSession(): Promise<boolean> {
   return (await readSession()) !== null;
 }
 
+export async function saveCachedUser(user: User): Promise<void> {
+  await setSecureValue(secureStorageKeys.cachedUser, JSON.stringify(user));
+}
+
+export async function readCachedUser(): Promise<User | null> {
+  const raw = await getSecureValue(secureStorageKeys.cachedUser);
+  if (!raw) return null;
+  try {
+    const user = JSON.parse(raw) as Partial<User>;
+    if (typeof user.id !== "string" || typeof user.email !== "string" || !user.role) return null;
+    return user as User;
+  } catch {
+    return null;
+  }
+}
+
 /** Clears the local session and tells subscribers to route to login. */
 export async function endSession(): Promise<void> {
   await clearSecureStorage();
@@ -91,7 +108,9 @@ const EXPIRY_SKEW_MS = 60_000; // refresh ~1 min before actual expiry
 // trigger another refresh attempt.
 const refreshClient = create({
   baseURL: `${env.API_URL}/api`,
-  timeout: 15_000,
+  // A sleeping Render free service can take well over a minute to respond.
+  // Waiting here is safer than discarding a valid refresh token on timeout.
+  timeout: 150_000,
 });
 
 let refreshPromise: Promise<string | null> | null = null;
@@ -103,13 +122,18 @@ async function doRefresh(refreshToken: string): Promise<string | null> {
     });
     await saveSessionFromResponse(data);
     return data.access_token as string;
-  } catch {
-    // One attempt, one failure, one logout — no retry loop. A refresh
-    // failure (expired, revoked, or reuse-detected) always means the same
-    // thing to the client: this session is over.
-    await endSession();
+  } catch (error) {
+    // Only an explicit auth rejection proves that the refresh token is no
+    // longer valid. Network failures, timeouts and server errors preserve it.
+    if (shouldExpireSessionForRefreshError(error)) await endSession();
     return null;
   }
+}
+
+export function shouldExpireSessionForRefreshError(error: unknown): boolean {
+  if (!isAxiosError(error)) return false;
+  const status = error.response?.status;
+  return status === 400 || status === 401 || status === 403;
 }
 
 /**

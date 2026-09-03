@@ -15,18 +15,17 @@ import {
   View,
 } from "react-native";
 
-import { apiClaimOffer, apiGetOffer, apiToggleSaveOffer } from "@/api/offers";
+import { apiClaimOffer, apiGetOffer } from "@/api/offers";
 import { toApiError } from "@/api/errors";
 import { queryKeys } from "@/api/queryKeys";
 import { ClaimSuccessCard } from "@/components/ClaimSuccessCard";
+import { SaveOfferFeedback } from "@/components/SaveOfferFeedback";
 import { AppText, Button, Screen } from "@/design-system/components";
 import { color, radius, space } from "@/design-system/tokens";
+import { useSaveOfferToggle } from "@/hooks/useSaveOfferToggle";
 import { useAuth } from "@/providers/AuthProvider";
 import { usePushNotifications } from "@/providers/PushNotificationProvider";
-import {
-  cancelSavedOfferReminder,
-  presentClaimReadyNotification,
-} from "@/services/localNotifications";
+import { presentClaimReadyNotification } from "@/services/localNotifications";
 import { isBrandOfferClaim, type ClaimResult } from "@/types/offer";
 import { resolveMediaUrl } from "@/utils/media";
 import { getVerificationHref } from "@/utils/verificationRoute";
@@ -37,6 +36,7 @@ export default function OfferDetailScreen() {
   const { reconcileReminders } = usePushNotifications();
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { feedback, toggleSave } = useSaveOfferToggle();
   const [claiming, setClaiming] = useState(false);
   const [claimError, setClaimError] = useState<string | null>(null);
   const [claimResult, setClaimResult] = useState<ClaimResult | null>(null);
@@ -52,13 +52,6 @@ export default function OfferDetailScreen() {
 
   const invalidateOffers = () =>
     queryClient.invalidateQueries({ queryKey: queryKeys.offers.all() });
-
-  const toggleSave = async () => {
-    if (!offer) return;
-    const result = await apiToggleSaveOffer(offer.id);
-    if (!result.saved && user) await cancelSavedOfferReminder(user.id, offer.id);
-    await invalidateOffers();
-  };
 
   const canClaim = user?.verification_status === "approved";
   const isListedBrand = Boolean(offer?.brand_url && !offer?.outlet_id);
@@ -112,8 +105,7 @@ export default function OfferDetailScreen() {
 
   const validity = offer.validity?.trim() || "Ongoing";
   const claimButtonLabel = isListedBrand ? "Claim & visit website" : "Claim this deal";
-  const couponResult =
-    claimResult && !isBrandOfferClaim(claimResult) ? claimResult : null;
+  const couponResult = claimResult && !isBrandOfferClaim(claimResult) ? claimResult : null;
   const newlyClaimed = Boolean(couponResult && !couponResult.already_active);
   const couponActive = Boolean(offer.active_coupon || couponResult?.already_active);
 
@@ -141,7 +133,7 @@ export default function OfferDetailScreen() {
               <Ionicons name="arrow-back" size={25} color="#FFFFFF" />
             </Pressable>
             <Pressable
-              onPress={() => void toggleSave()}
+              onPress={() => void toggleSave(offer)}
               style={styles.circleButton}
               accessibilityRole="button"
               accessibilityLabel={offer.saved ? "Remove from saved" : "Save deal"}
@@ -307,6 +299,7 @@ export default function OfferDetailScreen() {
           </View>
         </View>
       </Modal>
+      <SaveOfferFeedback feedback={feedback} />
     </Screen>
   );
 }

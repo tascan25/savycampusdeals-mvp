@@ -210,11 +210,6 @@ export default function OutletDetailScreen() {
                   <AppText variant="small" color={color.textSecondary} numberOfLines={2}>
                     {offer.description}
                   </AppText>
-                  {blocked && offer.claim_message ? (
-                    <AppText variant="caption" color={color.amber} style={styles.blockedText}>
-                      {offer.claim_message}
-                    </AppText>
-                  ) : null}
                   <View style={styles.viewDetailsRow}>
                     <AppText variant="caption" color="#A5B4FC">
                       View deal details
@@ -324,7 +319,6 @@ const styles = StyleSheet.create({
   dealInfo: { flex: 1, gap: 4 },
   dealInfoPressed: { opacity: 0.72 },
   viewDetailsRow: { marginTop: space.sm, flexDirection: "row", alignItems: "center", gap: 3 },
-  blockedText: { marginTop: 4 },
   dealAction: { alignItems: "flex-end", gap: space.sm, minWidth: 110 },
   activeAction: { alignItems: "flex-end", gap: 7 },
   activeBadge: {

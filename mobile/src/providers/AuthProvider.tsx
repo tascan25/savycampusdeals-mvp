@@ -12,9 +12,10 @@ import { apiLogin, apiLogout, apiLogoutAll, apiMe, apiRegister } from "@/api/aut
 import { apiDeleteAccount, apiUpdateProfile, type ProfileUpdate } from "@/api/profile";
 import {
   endSession,
-  hasSession,
   onSessionExpired,
+  readCachedUser,
   readSession,
+  saveCachedUser,
   saveSessionFromResponse,
 } from "@/services/session";
 import { getPushInstallationId } from "@/services/installation";
@@ -43,18 +44,22 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [user, setUser] = useState<User | null | undefined>(undefined);
 
   const hydrate = useCallback(async () => {
-    if (!(await hasSession())) {
+    const session = await readSession();
+    if (!session) {
       setUser(null);
       return;
     }
+    const cachedUser = await readCachedUser();
+    if (cachedUser) setUser(cachedUser);
     try {
-      setUser(await apiMe());
+      const freshUser = await apiMe();
+      await saveCachedUser(freshUser).catch(() => undefined);
+      setUser(freshUser);
     } catch {
-      // Interceptor already ended the session on an unrecoverable 401;
-      // any other failure (network) just leaves the user logged-out-looking
-      // for this app open — they'll resolve it by retrying on the login
-      // screen rather than being stuck on a silent loading state.
-      setUser(null);
+      // A confirmed invalid refresh token calls endSession() and the listener
+      // below routes to login. Temporary network/server failures retain the
+      // encrypted cached identity instead of impersonating a logout.
+      if (!(await readSession())) setUser(null);
     }
   }, []);
 
@@ -72,6 +77,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const login = useCallback(async (email: string, password: string) => {
     const result = await apiLogin({ email, password });
     await saveSessionFromResponse(result);
+    await saveCachedUser(result.user).catch(() => undefined);
     setUser(result.user);
     return result.user;
   }, []);
@@ -79,6 +85,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const register = useCallback(async (input: RegisterInput) => {
     const result = await apiRegister(input);
     await saveSessionFromResponse(result);
+    await saveCachedUser(result.user).catch(() => undefined);
     setUser(result.user);
     return { user: result.user, emailSent: result.email_sent, devOtp: result.dev_otp };
   }, []);
@@ -106,11 +113,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }, []);
 
   const refreshUser = useCallback(async () => {
-    setUser(await apiMe());
+    const freshUser = await apiMe();
+    await saveCachedUser(freshUser).catch(() => undefined);
+    setUser(freshUser);
   }, []);
 
   const updateProfile = useCallback(async (input: ProfileUpdate) => {
     const updated = await apiUpdateProfile(input);
+    await saveCachedUser(updated).catch(() => undefined);
     setUser(updated);
     return updated;
   }, []);
